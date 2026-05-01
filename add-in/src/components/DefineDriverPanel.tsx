@@ -1,0 +1,102 @@
+import { useState } from "react";
+import {
+  Button,
+  Textarea,
+  Field,
+  Text,
+  makeStyles,
+  tokens,
+} from "@fluentui/react-components";
+import { defineDriver, newRequestId } from "../api/client";
+import type { DimMemberInfo } from "../types/generated";
+import { MemberPicker } from "./MemberPicker";
+
+const useStyles = makeStyles({
+  root: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+  },
+  hint: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  status: { color: tokens.colorNeutralForeground2, minHeight: "1.4em" },
+  error: { color: tokens.colorPaletteRedForeground1 },
+});
+
+interface Props {
+  accounts: DimMemberInfo[]; // leaves only — parents would be rejected by backend
+  defaultAccount: string;
+  onDefined: () => void;
+}
+
+export function DefineDriverPanel({ accounts, defaultAccount, onDefined }: Props) {
+  const styles = useStyles();
+  const [account, setAccount] = useState(defaultAccount);
+  const [formula, setFormula] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok" | "error"; msg: string } | null>(null);
+
+  async function onDefine() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const resp = await defineDriver({
+        request_id: newRequestId(),
+        account,
+        formula,
+      });
+      setStatus({
+        kind: "ok",
+        msg: `Defined. Initial compute wrote ${resp.initial_computed_count} cells.`,
+      });
+      onDefined();
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        msg: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.root}>
+      <MemberPicker
+        label="Output account"
+        members={accounts}
+        value={account}
+        onChange={setAccount}
+        disabled={busy}
+      />
+      <Field label="Formula">
+        <Textarea
+          value={formula}
+          onChange={(_, d) => setFormula(d.value)}
+          disabled={busy}
+          placeholder="e.g. 4000_Revenue * 0.5"
+          rows={3}
+        />
+      </Field>
+      <Text className={styles.hint}>
+        Operators: + - * / parens. Identifiers are leaf account ids
+        (e.g. 4000_Revenue). Submitting at this account will be rejected
+        once the driver is defined.
+      </Text>
+      <Button
+        appearance="primary"
+        disabled={busy || !account || !formula.trim()}
+        onClick={onDefine}
+      >
+        {busy ? "Defining…" : "Define driver"}
+      </Button>
+      {status && (
+        <Text className={status.kind === "error" ? styles.error : styles.status}>
+          {status.kind === "error" ? `Error: ${status.msg}` : status.msg}
+        </Text>
+      )}
+    </div>
+  );
+}

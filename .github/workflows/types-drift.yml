@@ -1,0 +1,53 @@
+name: types-drift
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/src/vena_lite/schemas/**'
+      - 'backend/scripts/generate_ts_types.py'
+      - 'add-in/src/types/generated.ts'
+      - '.github/workflows/types-drift.yml'
+  pull_request:
+    paths:
+      - 'backend/src/vena_lite/schemas/**'
+      - 'backend/scripts/generate_ts_types.py'
+      - 'add-in/src/types/generated.ts'
+      - '.github/workflows/types-drift.yml'
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install json-schema-to-typescript
+        run: npm install -g json-schema-to-typescript
+
+      - name: Sync backend deps
+        working-directory: backend
+        run: uv sync
+
+      - name: Regenerate TypeScript types
+        working-directory: backend
+        run: uv run python scripts/generate_ts_types.py
+
+      - name: Verify no drift
+        run: |
+          if ! git diff --exit-code add-in/src/types/generated.ts; then
+            echo ""
+            echo "::error::Pydantic <-> TypeScript drift. Run 'make types' locally and commit add-in/src/types/generated.ts."
+            exit 1
+          fi

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+
+# uv
+uv.lock.disabled
+# Note: keep uv.lock checked in.
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Cube + metadata files (reproducible from seed CLI)
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+
+# Secrets / per-machine
+.env
+*.env
+.env.*
+.claude/settings.local.json
+
+# Note: add-in/src/types/generated.ts is INTENTIONALLY tracked.
+# Drift detection only works if it's in git.
