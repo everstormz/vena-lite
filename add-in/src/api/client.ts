@@ -1,6 +1,5 @@
 import type {
   DimMembersResponse,
-  DimName,
   DriverDefineRequest,
   DriverDefineResponse,
   DriverListResponse,
@@ -11,6 +10,7 @@ import type {
   SubmitRequest,
   SubmitResponse,
 } from "../types/generated";
+import type { DimName } from "../types/dims";
 
 // Vite proxies /api/* to the backend at http://127.0.0.1:8000 so the Excel WebView
 // (which serves the add-in over HTTPS) doesn't refuse a mixed-content fetch.
