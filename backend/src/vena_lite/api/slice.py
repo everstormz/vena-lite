@@ -1,6 +1,7 @@
 """POST /slice — validates members against the hierarchy, expands parents to
 leaves, queries the cube, then aggregates back up to the requested level.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,9 +15,7 @@ from .deps import get_cube, get_dim_model
 router = APIRouter()
 
 
-def _validate_members(
-    req: SliceRequest, dim_model: DimModel
-) -> list[dict]:
+def _validate_members(req: SliceRequest, dim_model: DimModel) -> list[dict]:
     errors: list[dict] = []
     for dim, f in req.filters.items():
         if f.members is None:

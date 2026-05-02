@@ -1,4 +1,5 @@
 """POST /submit contract: validation (incl. leaf-only), atomic cube+audit write."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -56,9 +57,7 @@ def test_submit_one_cell_returns_200_and_accepted_count(client: TestClient):
     assert r.json() == {"request_id": "req-1", "accepted_count": 1}
 
 
-def test_submit_writes_new_value_to_cube(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_submit_writes_new_value_to_cube(client: TestClient, seeded_store: DuckDBCubeStore):
     client.post(
         "/submit",
         json={"request_id": "req-2", "cells": [_existing_cell(value="42.000000")]},

@@ -3,6 +3,7 @@
 Called from /submit (after the user's writes land) and from /drivers/define
 (initial compute over every cube intersection).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -62,9 +63,7 @@ def compute_driver_cells(
             try:
                 value = driver.ast.evaluate(ctx)
             except FormulaError as e:
-                raise FormulaError(
-                    f"driver {account!r} at {tkey}: {e}"
-                ) from e
+                raise FormulaError(f"driver {account!r} at {tkey}: {e}") from e
             cell = SubmittedCell(
                 account=account,
                 entity=tkey[0],

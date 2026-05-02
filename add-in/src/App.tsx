@@ -41,9 +41,10 @@ import {
 import type { PageFilters } from "./excel/pivot";
 import { CopyScenarioPanel } from "./components/CopyScenarioPanel";
 import { DefineDriverPanel } from "./components/DefineDriverPanel";
+import { DimensionManagerPanel } from "./components/DimensionManagerPanel";
 import { FilterStrip } from "./components/FilterStrip";
 import { AxisPicker } from "./components/AxisPicker";
-import type { DimMemberInfo, SubmittedCell } from "./types/generated";
+import type { DimMemberInfo, DriverInfo, SubmittedCell } from "./types/generated";
 import { DIM_NAMES, type DimName } from "./types/dims";
 
 const useStyles = makeStyles({
@@ -151,7 +152,8 @@ export default function App() {
   const [dimensionsByName, setDimensionsByName] = useState<
     Partial<Record<DimName, DimMemberInfo[]>>
   >({});
-  const [driverAccounts, setDriverAccounts] = useState<Set<string>>(new Set());
+  const [drivers, setDrivers] = useState<DriverInfo[]>([]);
+  const driverAccounts = new Set(drivers.map((d) => d.account));
   const [filterState, setFilterState] = useState<FilterState>(defaultFilterState());
   const [lastLayout, setLastLayout] = useState<LayoutDescriptor | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "loading", what: "init" });
@@ -178,7 +180,7 @@ export default function App() {
       version: version.members,
     };
     setDimensionsByName(byName);
-    setDriverAccounts(new Set(drivers.drivers.map((d) => d.account)));
+    setDrivers(drivers.drivers);
     return byName;
   }, []);
 
@@ -436,7 +438,19 @@ export default function App() {
                 <DefineDriverPanel
                   accounts={accounts}
                   defaultAccount={accountForDriverDefault}
+                  drivers={drivers}
                   onDefined={() => {
+                    void reloadDropdowns();
+                  }}
+                />
+              </AccordionPanel>
+            </AccordionItem>
+            <AccordionItem value="manage">
+              <AccordionHeader>Manage dimensions</AccordionHeader>
+              <AccordionPanel>
+                <DimensionManagerPanel
+                  dimensionsByName={dimensionsByName}
+                  onChanged={() => {
                     void reloadDropdowns();
                   }}
                 />

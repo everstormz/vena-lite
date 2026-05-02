@@ -1,4 +1,5 @@
 """Pydantic schema correctness — validation, decimal precision, JSON wire format."""
+
 from __future__ import annotations
 
 import json

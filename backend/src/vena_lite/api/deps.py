@@ -9,6 +9,7 @@ test overrides on `get_metadata` cascade through naturally — without that, a
 test that swaps the metadata store would still get a CalcEngine / DimModel
 loaded from the global singleton.
 """
+
 from __future__ import annotations
 
 from fastapi import Depends

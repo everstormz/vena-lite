@@ -6,6 +6,7 @@ context manager wraps an explicit BEGIN/COMMIT so submit batches are atomic
 on the cube side; coordinated commit with the SQLite audit store happens at
 the API layer.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
@@ -113,8 +114,10 @@ class DuckDBCubeStore:
         # but escaping the VALUES clause robustly is fiddly across versions; an OR
         # chain over executemany-friendly placeholders is more portable.
         clause = " OR ".join(
-            ["(account_id=? AND entity_id=? AND costcenter_id=? "
-             "AND period_id=? AND scenario_id=? AND version_id=?)"]
+            [
+                "(account_id=? AND entity_id=? AND costcenter_id=? "
+                "AND period_id=? AND scenario_id=? AND version_id=?)"
+            ]
             * len(intersections)
         )
         params: list[object] = [item for tpl in intersections for item in tpl]

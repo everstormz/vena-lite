@@ -1,4 +1,6 @@
-"""DimModel: known/leaf/get_leaves over the seeded hierarchy."""
+"""DimModel: known/leaf/get_leaves over the seeded hierarchy.
+Slice 9: lookup() exposes the per-member record (display_name, parent, etc)."""
+
 from __future__ import annotations
 
 from vena_lite.hierarchy_seed import hierarchy_seed
@@ -76,3 +78,17 @@ def test_hierarchy_seed_leaves_match_cube_seed():
     assert sorted(model.all_leaves("period")) == sorted(PERIODS)
     assert sorted(model.all_leaves("scenario")) == sorted(SCENARIOS)
     assert sorted(model.all_leaves("version")) == sorted(VERSIONS)
+
+
+def test_lookup_returns_record_with_display_name_field(dim_model: DimModel):
+    rec = dim_model.lookup("account", "4000_Revenue")
+    assert rec is not None
+    assert rec["parent"] == "Total_PnL"
+    assert "display_name" in rec
+    # Seed members have NULL display_name; rendering layer falls back to id.
+    assert rec["display_name"] is None
+
+
+def test_lookup_returns_none_for_unknown(dim_model: DimModel):
+    assert dim_model.lookup("account", "NoSuchMember") is None
+    assert dim_model.lookup("not_a_dim", "Total_PnL") is None

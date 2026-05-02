@@ -3,6 +3,7 @@
 Lives in production code (not tests) because the `seed` CLI command imports it
 to bootstrap a demo cube.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -16,12 +17,7 @@ SCENARIOS = ["Actual"]
 VERSIONS = ["v1"]
 
 EXPECTED_FACT_COUNT = (
-    len(ACCOUNTS)
-    * len(ENTITIES)
-    * len(COSTCENTERS)
-    * len(PERIODS)
-    * len(SCENARIOS)
-    * len(VERSIONS)
+    len(ACCOUNTS) * len(ENTITIES) * len(COSTCENTERS) * len(PERIODS) * len(SCENARIOS) * len(VERSIONS)
 )
 assert EXPECTED_FACT_COUNT == 96
 

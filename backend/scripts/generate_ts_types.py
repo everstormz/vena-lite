@@ -10,6 +10,7 @@ trailing newline. CI's drift check diffs the regenerated file against what's
 committed; either side drifting (tooling update, schema change without regen)
 fails the gate.
 """
+
 from __future__ import annotations
 
 import os

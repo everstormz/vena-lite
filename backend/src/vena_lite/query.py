@@ -3,6 +3,7 @@
 The slice endpoint orchestrates: validate -> expand_filters -> cube.slice ->
 aggregate_to_requested. Tests live in tests/unit/test_query.py.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -92,7 +93,5 @@ def aggregate_to_requested(
         )
         for k, v in grouped.items()
     ]
-    out.sort(
-        key=lambda r: (r.account, r.entity, r.costcenter, r.period, r.scenario, r.version)
-    )
+    out.sort(key=lambda r: (r.account, r.entity, r.costcenter, r.period, r.scenario, r.version))
     return out

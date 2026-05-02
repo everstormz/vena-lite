@@ -1,4 +1,5 @@
 """SQLite audit store: row insertion, transaction commit/rollback, decimal-as-text."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -9,8 +10,20 @@ from vena_lite.metadata.store import SQLiteMetadataStore
 
 
 def _row(req: str = "req-1", before: str | None = "100.000000", after: str = "200.000000") -> tuple:
-    return (req, "local", "4000_Revenue", "E001_US", "CC100_Sales",
-            "2026-01", "Actual", "v1", before, after, "submit")
+    return (
+        req,
+        "local",
+        "4000_Revenue",
+        "E001_US",
+        "CC100_Sales",
+        "2026-01",
+        "Actual",
+        "v1",
+        before,
+        after,
+        "submit",
+        None,
+    )
 
 
 def test_append_one_row_returns_count(metadata_store: SQLiteMetadataStore):
@@ -61,6 +74,35 @@ def test_transaction_rolls_back_on_exception(metadata_store: SQLiteMetadataStore
             raise BoomError()
 
     assert metadata_store.count_rows_for_request("tx-rollback") == 0
+
+
+def test_audit_row_with_details_round_trip(metadata_store: SQLiteMetadataStore):
+    """Slice 9: details column carries kind-specific JSON."""
+    row = (
+        "dim-r1",
+        "local",
+        "account",
+        "4000_Revenue",
+        "",
+        "",
+        "",
+        "",
+        None,
+        "Marketing",
+        "dim_change",
+        '{"field":"create"}',
+    )
+    metadata_store.append_audit_rows([row])
+    rows = metadata_store.fetch_rows_for_request("dim-r1")
+    assert rows[0]["source"] == "dim_change"
+    assert rows[0]["details"] == '{"field":"create"}'
+
+
+def test_audit_row_tuple_len_is_12(metadata_store: SQLiteMetadataStore):
+    """Pin the row shape so an accidental 11-tuple call site fails loudly."""
+    eleven_tuple = ("req", "local", "a", "e", "c", "p", "s", "v", None, "1", "submit")
+    with pytest.raises((TypeError, sqlite3.ProgrammingError)):
+        metadata_store.append_audit_rows([eleven_tuple])  # type: ignore[arg-type]
 
 
 def test_audit_table_persists_to_file(metadata_path):

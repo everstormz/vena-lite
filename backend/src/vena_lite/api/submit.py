@@ -5,6 +5,7 @@ Atomicity: cube `bulk_insert` + SQLite `audit_log` writes in nested
 transactions, then driver recalc happens IN THE SAME TRANSACTIONS so a
 formula failure rolls back the user write too.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,9 +31,7 @@ _DIMS_PER_CELL: tuple[tuple[str, str], ...] = (
 )
 
 
-def _validate_cells(
-    cells: list, dim_model: DimModel, engine: CalcEngine
-) -> list[dict]:
+def _validate_cells(cells: list, dim_model: DimModel, engine: CalcEngine) -> list[dict]:
     errors: list[dict] = []
     for i, cell in enumerate(cells):
         invalid: list[dict] = []

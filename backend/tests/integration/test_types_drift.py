@@ -7,6 +7,7 @@ runs in CI; this is the developer-side mirror.
 Skipped automatically if `json2ts` isn't installed locally — the CI job has
 its own enforcement, so a missing local toolchain doesn't break dev loops.
 """
+
 from __future__ import annotations
 
 import os

@@ -1,15 +1,21 @@
 """Public schema surface. Re-exports keep `vena_lite.schemas` as the single
 module the TypeScript generator inspects."""
+
 from .dimensions import (
     DIM_NAMES,
     DimFilter,
+    DimMemberCreateRequest,
+    DimMemberDeleteResponse,
     DimMemberInfo,
+    DimMemberMutationResponse,
     DimMembersResponse,
+    DimMemberUpdateRequest,
     DimName,
 )
 from .drivers import (
     DriverDefineRequest,
     DriverDefineResponse,
+    DriverDeleteResponse,
     DriverInfo,
     DriverListResponse,
 )
@@ -33,11 +39,16 @@ __all__ = [
     "CellValidationError",
     "CreatedDimMember",
     "DimFilter",
+    "DimMemberCreateRequest",
+    "DimMemberDeleteResponse",
     "DimMemberInfo",
+    "DimMemberMutationResponse",
+    "DimMemberUpdateRequest",
     "DimMembersResponse",
     "DimName",
     "DriverDefineRequest",
     "DriverDefineResponse",
+    "DriverDeleteResponse",
     "DriverInfo",
     "DriverListResponse",
     "FactRow",

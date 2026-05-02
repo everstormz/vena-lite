@@ -1,4 +1,5 @@
 """POST /slice contract: validation, hierarchy expansion, aggregation, decimal-as-string."""
+
 from __future__ import annotations
 
 import json
@@ -16,9 +17,7 @@ from vena_lite.seed import ACCOUNTS, EXPECTED_FACT_COUNT, deterministic_value
 
 
 @pytest.fixture
-def client(
-    seeded_store: DuckDBCubeStore, dim_model: DimModel
-) -> Iterator[TestClient]:
+def client(seeded_store: DuckDBCubeStore, dim_model: DimModel) -> Iterator[TestClient]:
     app.dependency_overrides[get_cube] = lambda: seeded_store
     app.dependency_overrides[get_dim_model] = lambda: dim_model
     try:

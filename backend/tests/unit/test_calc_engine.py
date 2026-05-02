@@ -1,4 +1,5 @@
 """CalcEngine: cycle detection + affected-in-topo-order."""
+
 from __future__ import annotations
 
 from vena_lite.calc.engine import CalcEngine, CycleError, Driver

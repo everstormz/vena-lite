@@ -1,4 +1,5 @@
 """Slice request/response schemas. Decimals serialize as JSON strings on the wire."""
+
 from __future__ import annotations
 
 from decimal import Decimal

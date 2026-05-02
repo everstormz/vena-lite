@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   version_id          TEXT      NOT NULL,
   before_value        TEXT,                  -- nullable: NULL when the cell did not exist before
   after_value         TEXT      NOT NULL,
-  source              TEXT      NOT NULL DEFAULT 'submit'
+  source              TEXT      NOT NULL DEFAULT 'submit',
+  details             TEXT                   -- Slice 9: JSON for non-submit rows (dim_change, driver_change)
 );
 
 -- Decimal-as-TEXT preserves DECIMAL(20,6) precision exactly. SQLite REAL would
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS dim_member (
   parent_member_id  TEXT,
   rollup_op         TEXT NOT NULL DEFAULT 'sum',
   ordinal           INTEGER NOT NULL DEFAULT 0,
+  display_name      TEXT,                   -- Slice 9: NULL → render falls back to member_id
   PRIMARY KEY (dim_name, member_id)
 );
 

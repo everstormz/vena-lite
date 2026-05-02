@@ -8,6 +8,7 @@ Grammar:
 No eval, no functions, no string literals. Identifiers are account ids.
 Decimal literals support `123` and `123.456`.
 """
+
 from __future__ import annotations
 
 import re
@@ -51,9 +52,7 @@ def tokenize(s: str) -> list[Token]:
             continue
         m = _TOKEN_RE.match(s, pos)
         if not m:
-            raise FormulaError(
-                f"Unexpected character at position {pos}: {s[pos]!r}"
-            )
+            raise FormulaError(f"Unexpected character at position {pos}: {s[pos]!r}")
         for typ, _ in _TOKEN_PATTERNS:
             v = m.group(typ)
             if v is not None:
@@ -156,9 +155,7 @@ class _Parser:
             raise FormulaError("Empty formula")
         e = self._expr()
         if self._pos != len(self._tokens):
-            raise FormulaError(
-                f"Unexpected token at position {self._pos}: {self._peek()}"
-            )
+            raise FormulaError(f"Unexpected token at position {self._pos}: {self._peek()}")
         return e
 
     def _expr(self) -> Expr:

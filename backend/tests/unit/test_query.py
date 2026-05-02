@@ -1,4 +1,5 @@
 """Pure query helpers: expand_filters + aggregate_to_requested."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -49,9 +50,7 @@ def test_expand_with_parent_filter_yields_leaves(dim_model: DimModel):
 
 
 def test_expand_with_two_level_parent(dim_model: DimModel):
-    cube_filters, mappings = expand_filters(
-        {"period": DimFilter(members=["2026-FY"])}, dim_model
-    )
+    cube_filters, mappings = expand_filters({"period": DimFilter(members=["2026-FY"])}, dim_model)
     assert len(cube_filters["period"].members) == 12
     # Every leaf maps back to the year.
     assert all(v == "2026-FY" for v in mappings["period"].values())
@@ -69,9 +68,7 @@ def test_expand_with_mixed_parent_and_leaf(dim_model: DimModel):
 
 
 def test_expand_with_empty_members_list_preserves_match_nothing(dim_model: DimModel):
-    cube_filters, mappings = expand_filters(
-        {"account": DimFilter(members=[])}, dim_model
-    )
+    cube_filters, mappings = expand_filters({"account": DimFilter(members=[])}, dim_model)
     assert cube_filters["account"].members == []
 
 
@@ -80,9 +77,17 @@ def test_expand_with_empty_members_list_preserves_match_nothing(dim_model: DimMo
 
 def test_aggregate_no_mapping_passes_through_as_is():
     rows = [_row("100"), _row("200", period="2026-02")]
-    mappings = {dim: None for dim in (
-        "account", "entity", "costcenter", "period", "scenario", "version",
-    )}
+    mappings = {
+        dim: None
+        for dim in (
+            "account",
+            "entity",
+            "costcenter",
+            "period",
+            "scenario",
+            "version",
+        )
+    }
     out = aggregate_to_requested(rows, mappings)  # type: ignore[arg-type]
     assert len(out) == 2  # no group collapse
     assert sum(r.value for r in out) == Decimal("300")
@@ -95,8 +100,11 @@ def test_aggregate_sums_when_period_collapsed_to_quarter():
         _row("30", period="2026-03"),
     ]
     mappings = {
-        "account": None, "entity": None, "costcenter": None,
-        "scenario": None, "version": None,
+        "account": None,
+        "entity": None,
+        "costcenter": None,
+        "scenario": None,
+        "version": None,
         "period": {"2026-01": "2026-Q1", "2026-02": "2026-Q1", "2026-03": "2026-Q1"},
     }
     out = aggregate_to_requested(rows, mappings)  # type: ignore[arg-type]
@@ -111,7 +119,10 @@ def test_aggregate_keeps_groups_separate_when_dim_value_differs():
         _row("100", entity="E002_UK", period="2026-01"),
     ]
     mappings = {
-        "account": None, "costcenter": None, "scenario": None, "version": None,
+        "account": None,
+        "costcenter": None,
+        "scenario": None,
+        "version": None,
         "entity": None,  # don't collapse entities
         "period": {"2026-01": "2026-Q1"},
     }
@@ -130,7 +141,10 @@ def test_aggregate_two_dims_collapsed_simultaneously():
         _row("4", account="5000_OpEx", entity="E002_UK"),
     ]
     mappings = {
-        "costcenter": None, "period": None, "scenario": None, "version": None,
+        "costcenter": None,
+        "period": None,
+        "scenario": None,
+        "version": None,
         "account": {"4000_Revenue": "Total_PnL", "5000_OpEx": "Total_PnL"},
         "entity": {"E001_US": "Worldwide", "E002_UK": "Worldwide"},
     }
@@ -142,7 +156,15 @@ def test_aggregate_two_dims_collapsed_simultaneously():
 
 
 def test_aggregate_empty_input_yields_empty():
-    mappings = {dim: None for dim in (
-        "account", "entity", "costcenter", "period", "scenario", "version",
-    )}
+    mappings = {
+        dim: None
+        for dim in (
+            "account",
+            "entity",
+            "costcenter",
+            "period",
+            "scenario",
+            "version",
+        )
+    }
     assert aggregate_to_requested([], mappings) == []  # type: ignore[arg-type]

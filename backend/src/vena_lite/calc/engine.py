@@ -3,6 +3,7 @@
 Pure: no I/O at this layer. The /submit and /drivers endpoints orchestrate
 cube/audit writes around what the engine returns.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

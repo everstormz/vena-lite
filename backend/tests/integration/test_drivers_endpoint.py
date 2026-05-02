@@ -1,4 +1,5 @@
 """POST /drivers/define + driver recalc triggered by /submit."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -169,9 +170,7 @@ def test_define_self_reference_returns_400(client: TestClient):
 # --- recalc on submit -----------------------------------------------
 
 
-def test_submit_to_input_triggers_driver_recalc(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_submit_to_input_triggers_driver_recalc(client: TestClient, seeded_store: DuckDBCubeStore):
     client.post(
         "/drivers/define",
         json={
@@ -239,9 +238,7 @@ def test_submit_to_driver_account_returns_400_with_driver_reason(client: TestCli
     assert r.status_code == 400
     invalid = r.json()["detail"]["errors"][0]["invalid_members"]
     assert any(
-        m["dim"] == "account"
-        and m["member"] == "5000_OpEx"
-        and m["reason"] == "driver"
+        m["dim"] == "account" and m["member"] == "5000_OpEx" and m["reason"] == "driver"
         for m in invalid
     )
 
@@ -264,9 +261,83 @@ def test_get_drivers_lists_defined_driver(client: TestClient):
     r = client.get("/drivers")
     assert r.status_code == 200
     body = r.json()
-    assert body["drivers"] == [
-        {"account": "5000_OpEx", "formula": "4000_Revenue * 0.5"}
-    ]
+    assert body["drivers"] == [{"account": "5000_OpEx", "formula": "4000_Revenue * 0.5"}]
+
+
+# --- DELETE (Slice 9 — undefine) -------------------------------------
+
+
+def test_delete_driver_succeeds_and_audits(
+    client: TestClient, hierarchy_seeded_metadata: SQLiteMetadataStore
+):
+    client.post(
+        "/drivers/define",
+        json={"request_id": "drv-d1", "account": "5000_OpEx", "formula": "4000_Revenue * 0.5"},
+    )
+    r = client.delete("/drivers/5000_OpEx", params={"request_id": "undef-1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["account"] == "5000_OpEx"
+    assert body["formula"] == "4000_Revenue * 0.5"
+    audit = hierarchy_seeded_metadata.fetch_rows_for_request("undef-1")
+    assert len(audit) == 1
+    assert audit[0]["source"] == "driver_change"
+    assert "undefine" in audit[0]["details"]
+
+
+def test_delete_driver_404_when_not_defined(client: TestClient):
+    r = client.delete("/drivers/5000_OpEx", params={"request_id": "x"})
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "DRIVER_NOT_DEFINED"
+
+
+def test_submit_to_undefined_account_legal_after_delete(client: TestClient):
+    """Define -> submit-rejected -> undefine -> submit-accepted. Locks in the
+    user-confirmed semantic that previously-driver accounts become editable
+    once the driver row is gone."""
+    client.post(
+        "/drivers/define",
+        json={"request_id": "drv-flow", "account": "5000_OpEx", "formula": "4000_Revenue * 0.5"},
+    )
+    bad = client.post(
+        "/submit",
+        json={
+            "request_id": "sub-rej",
+            "cells": [
+                {
+                    "account": "5000_OpEx",
+                    "entity": "E001_US",
+                    "costcenter": "CC100_Sales",
+                    "period": "2026-01",
+                    "scenario": "Actual",
+                    "version": "v1",
+                    "value": "42.000000",
+                }
+            ],
+        },
+    )
+    assert bad.status_code == 400  # rejected: driver
+
+    client.delete("/drivers/5000_OpEx", params={"request_id": "u"})
+
+    ok = client.post(
+        "/submit",
+        json={
+            "request_id": "sub-ok",
+            "cells": [
+                {
+                    "account": "5000_OpEx",
+                    "entity": "E001_US",
+                    "costcenter": "CC100_Sales",
+                    "period": "2026-01",
+                    "scenario": "Actual",
+                    "version": "v1",
+                    "value": "42.000000",
+                }
+            ],
+        },
+    )
+    assert ok.status_code == 200, ok.text
 
 
 def test_submit_only_recalcs_affected_intersections(

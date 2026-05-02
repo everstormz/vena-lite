@@ -1,4 +1,5 @@
 """CLI entry: `python -m vena_lite.cli {seed} ...`. Idempotent."""
+
 from __future__ import annotations
 
 import sys

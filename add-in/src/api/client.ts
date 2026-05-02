@@ -1,7 +1,12 @@
 import type {
+  DimMemberCreateRequest,
+  DimMemberDeleteResponse,
+  DimMemberMutationResponse,
   DimMembersResponse,
+  DimMemberUpdateRequest,
   DriverDefineRequest,
   DriverDefineResponse,
+  DriverDeleteResponse,
   DriverListResponse,
   ScenarioCopyRequest,
   ScenarioCopyResponse,
@@ -38,6 +43,28 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await r.json()) as T;
 }
 
+async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`PATCH ${path} failed: ${r.status} ${r.statusText} ${text}`);
+  }
+  return (await r.json()) as T;
+}
+
+async function deleteJson<T>(path: string): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`DELETE ${path} failed: ${r.status} ${r.statusText} ${text}`);
+  }
+  return (await r.json()) as T;
+}
+
 // --- read endpoints --------------------------------------------------
 
 export function fetchSlice(req: SliceRequest): Promise<SliceResponse> {
@@ -64,6 +91,47 @@ export function copyScenario(req: ScenarioCopyRequest): Promise<ScenarioCopyResp
 
 export function defineDriver(req: DriverDefineRequest): Promise<DriverDefineResponse> {
   return postJson<DriverDefineResponse>("/drivers/define", req);
+}
+
+// --- Slice 9 dim CRUD + driver lifecycle -----------------------------
+
+export function addDimMember(
+  dim: DimName,
+  req: DimMemberCreateRequest,
+): Promise<DimMemberMutationResponse> {
+  return postJson<DimMemberMutationResponse>(`/dimensions/${dim}/members`, req);
+}
+
+export function updateDimMember(
+  dim: DimName,
+  id: string,
+  req: DimMemberUpdateRequest,
+): Promise<DimMemberMutationResponse> {
+  return patchJson<DimMemberMutationResponse>(
+    `/dimensions/${dim}/members/${encodeURIComponent(id)}`,
+    req,
+  );
+}
+
+export function deleteDimMember(
+  dim: DimName,
+  id: string,
+  requestId: string,
+): Promise<DimMemberDeleteResponse> {
+  const qs = new URLSearchParams({ request_id: requestId }).toString();
+  return deleteJson<DimMemberDeleteResponse>(
+    `/dimensions/${dim}/members/${encodeURIComponent(id)}?${qs}`,
+  );
+}
+
+export function deleteDriver(
+  account: string,
+  requestId: string,
+): Promise<DriverDeleteResponse> {
+  const qs = new URLSearchParams({ request_id: requestId }).toString();
+  return deleteJson<DriverDeleteResponse>(
+    `/drivers/${encodeURIComponent(account)}?${qs}`,
+  );
 }
 
 // --- helpers ---------------------------------------------------------

@@ -3,6 +3,7 @@ slice/submit endpoints to validate members and expand parents to leaves.
 
 v1 only honors `rollup_op='sum'` — other operators are stored but ignored.
 """
+
 from __future__ import annotations
 
 from .store import DimMemberRow, SQLiteMetadataStore
@@ -15,11 +16,12 @@ class DimModel:
         self._members: dict[tuple[str, str], dict] = {}
         self._children: dict[tuple[str, str], list[str]] = {}
 
-        for dim_name, member_id, parent_id, rollup_op, ordinal in rows:
+        for dim_name, member_id, parent_id, rollup_op, ordinal, display_name in rows:
             self._members[(dim_name, member_id)] = {
                 "parent": parent_id,
                 "rollup_op": rollup_op,
                 "ordinal": ordinal,
+                "display_name": display_name,
             }
         # Build children index in a second pass so we don't depend on row order.
         for (dim_name, member_id), rec in self._members.items():
@@ -68,3 +70,11 @@ class DimModel:
 
     def all_members(self, dim: str) -> list[str]:
         return [m for (d, m) in self._members if d == dim]
+
+    def lookup(self, dim: str, member: str) -> dict | None:
+        """Return the in-memory record for (dim, member) or None if unknown.
+
+        Record keys: 'parent', 'rollup_op', 'ordinal', 'display_name'.
+        Replaces the prior private-attribute access in api/dimensions.py.
+        """
+        return self._members.get((dim, member))

@@ -27,14 +27,49 @@ export interface CreatedDimMember {
 export interface DimFilter {
   members?: string[] | null;
 }
+export interface DimMemberCreateRequest {
+  request_id: string;
+  id: string;
+  display_name?: string | null;
+  parent?: string | null;
+  ordinal?: number;
+  rollup_op?: string;
+}
+export interface DimMemberDeleteResponse {
+  request_id: string;
+  dim: "account" | "entity" | "costcenter" | "period" | "scenario" | "version";
+  member: string;
+  descendants_deleted: string[];
+  audit_id: number;
+}
 /**
  * One row in `GET /dimensions/{dim}/members`.
+ *
+ * Slice 9: `display_name` is the user-facing alias. NULL → render falls back
+ * to `id`. Cube facts and driver formulas always reference `id` (immutable).
  */
 export interface DimMemberInfo {
   id: string;
   is_leaf: boolean;
   parent?: string | null;
   rollup_op?: string;
+  display_name?: string | null;
+}
+export interface DimMemberMutationResponse {
+  request_id: string;
+  dim: "account" | "entity" | "costcenter" | "period" | "scenario" | "version";
+  member: DimMemberInfo;
+  audit_id: number;
+}
+/**
+ * PATCH body. Omitted fields stay unchanged. `display_name=null` clears
+ * the alias (renders as id again). No `id` (immutable). No `parent` (no
+ * reparent in v1).
+ */
+export interface DimMemberUpdateRequest {
+  request_id: string;
+  display_name?: string | null;
+  ordinal?: number | null;
 }
 export interface DimMembersResponse {
   dim: string;
@@ -51,6 +86,12 @@ export interface DriverDefineResponse {
   formula: string;
   references: string[];
   initial_computed_count: number;
+}
+export interface DriverDeleteResponse {
+  request_id: string;
+  account: string;
+  formula: string;
+  audit_id: number;
 }
 export interface DriverInfo {
   account: string;

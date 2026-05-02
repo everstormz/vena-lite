@@ -1,4 +1,5 @@
 """Cube store correctness against the 96-fact seed."""
+
 from __future__ import annotations
 
 from decimal import Decimal

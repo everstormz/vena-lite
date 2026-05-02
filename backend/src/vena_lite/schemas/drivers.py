@@ -1,4 +1,5 @@
-"""Driver definition schemas (Slice 6)."""
+"""Driver definition schemas (Slice 6 + Slice 9 lifecycle)."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -25,3 +26,10 @@ class DriverInfo(BaseModel):
 
 class DriverListResponse(BaseModel):
     drivers: list[DriverInfo]
+
+
+class DriverDeleteResponse(BaseModel):
+    request_id: str
+    account: str
+    formula: str  # the formula that was removed
+    audit_id: int

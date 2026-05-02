@@ -1,4 +1,5 @@
 """POST /scenarios/copy — copy + audit + dim_member registration."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -25,9 +26,7 @@ def client(
     the next get_dim_model() call sees them)."""
     app.dependency_overrides[get_cube] = lambda: seeded_store
     app.dependency_overrides[get_metadata] = lambda: hierarchy_seeded_metadata
-    app.dependency_overrides[get_dim_model] = (
-        lambda: DimModel.from_store(hierarchy_seeded_metadata)
-    )
+    app.dependency_overrides[get_dim_model] = lambda: DimModel.from_store(hierarchy_seeded_metadata)
     try:
         with TestClient(app) as c:
             yield c
@@ -86,9 +85,7 @@ def test_copy_creates_both_when_target_version_is_new(
     assert ("version", "v2") in created
 
 
-def test_copy_target_facts_equal_source_facts(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_copy_target_facts_equal_source_facts(client: TestClient, seeded_store: DuckDBCubeStore):
     client.post("/scenarios/copy", json=_BASE_COPY)
     src = seeded_store.slice(
         {"scenario": DimFilter(members=["Actual"]), "version": DimFilter(members=["v1"])}
@@ -97,18 +94,12 @@ def test_copy_target_facts_equal_source_facts(
         {"scenario": DimFilter(members=["Forecast"]), "version": DimFilter(members=["v1"])}
     )
     assert len(src) == len(tgt)
-    src_by_int = {
-        (r.account, r.entity, r.costcenter, r.period): r.value for r in src
-    }
-    tgt_by_int = {
-        (r.account, r.entity, r.costcenter, r.period): r.value for r in tgt
-    }
+    src_by_int = {(r.account, r.entity, r.costcenter, r.period): r.value for r in src}
+    tgt_by_int = {(r.account, r.entity, r.costcenter, r.period): r.value for r in tgt}
     assert src_by_int == tgt_by_int
 
 
-def test_copy_source_unchanged_after(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_copy_source_unchanged_after(client: TestClient, seeded_store: DuckDBCubeStore):
     before = seeded_store.slice(
         {"scenario": DimFilter(members=["Actual"]), "version": DimFilter(members=["v1"])}
     )
@@ -146,9 +137,7 @@ def test_subsequent_slice_at_target_returns_copied_facts(client: TestClient):
     assert r.json()["total"] == 96
 
 
-def test_submit_to_new_target_works(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_submit_to_new_target_works(client: TestClient, seeded_store: DuckDBCubeStore):
     """After copy, Forecast is a known leaf scenario → submit accepted."""
     client.post("/scenarios/copy", json=_BASE_COPY)
     submit = {
@@ -181,9 +170,7 @@ def test_submit_to_new_target_works(
     assert rows[0].value == Decimal("9999.000000")
 
 
-def test_recopy_appends_new_rows_latest_wins(
-    client: TestClient, seeded_store: DuckDBCubeStore
-):
+def test_recopy_appends_new_rows_latest_wins(client: TestClient, seeded_store: DuckDBCubeStore):
     """First copy populates Forecast. User then submits an edit. Re-copy from
     Actual overwrites — facts_current shows the re-copied (=Actual) value."""
     client.post("/scenarios/copy", json=_BASE_COPY)

@@ -1,4 +1,5 @@
 """Application configuration. v1: env var overrides for the cube + metadata files."""
+
 from __future__ import annotations
 
 import os

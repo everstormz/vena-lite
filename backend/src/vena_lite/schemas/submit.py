@@ -3,6 +3,7 @@
 `SubmittedCell` is the "submit" counterpart of `FactRow` — same dim members,
 same Decimal precision, but the cell is a write intent, not a stored fact.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

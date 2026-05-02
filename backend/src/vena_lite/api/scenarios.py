@@ -9,6 +9,7 @@ Atomicity: dim_member upsert + audit_log rows commit FIRST in the SQLite
 transaction; cube facts commit SECOND in the DuckDB transaction. Same
 ghost-audit-on-cube-failure tradeoff as /submit.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -104,14 +105,10 @@ def copy_scenario(
         (c.account, c.entity, c.costcenter, c.period, c.scenario, c.version, c.value)
         for c in target_cells
     ]
-    audit_rows = build_audit_rows(
-        target_cells, before_map, req.request_id, source="copy"
-    )
+    audit_rows = build_audit_rows(target_cells, before_map, req.request_id, source="copy")
 
     created = _new_dim_members(req.target, dim_model)
-    new_dim_rows: list[DimMemberRow] = [
-        (m.dim, m.member, None, "sum", 0) for m in created
-    ]
+    new_dim_rows: list[DimMemberRow] = [(m.dim, m.member, None, "sum", 0, None) for m in created]
 
     cube_source = f"copy:{req.request_id}:from={req.source.scenario}/{req.source.version}"
 

@@ -1,4 +1,5 @@
 """FastAPI app entry. Run via `uv run uvicorn vena_lite.main:app --reload`."""
+
 from __future__ import annotations
 
 from fastapi import FastAPI
@@ -23,7 +24,7 @@ app.add_middleware(
         "https://localhost:3001",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
 

@@ -11,10 +11,12 @@ value at every (entity, costcenter, period, scenario, version) tuple that
 currently exists in the cube. Cube + audit writes are atomic per the standard
 nested-transaction pattern.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..audit import build_driver_change_audit_row
 from ..calc.engine import CalcEngine, Driver
 from ..calc.parser import FormulaError, parse_formula
 from ..calc.recalc import recalc_for_initial_define
@@ -24,6 +26,7 @@ from ..metadata.store import SQLiteMetadataStore
 from ..schemas.drivers import (
     DriverDefineRequest,
     DriverDefineResponse,
+    DriverDeleteResponse,
     DriverInfo,
     DriverListResponse,
 )
@@ -52,14 +55,15 @@ def define_driver(
     if not dim_model.is_known("account", req.account):
         raise HTTPException(
             status_code=400,
-            detail={"code": "DRIVER_DEFINE_INVALID",
-                    "message": f"Unknown account {req.account!r}"},
+            detail={"code": "DRIVER_DEFINE_INVALID", "message": f"Unknown account {req.account!r}"},
         )
     if not dim_model.is_leaf("account", req.account):
         raise HTTPException(
             status_code=400,
-            detail={"code": "DRIVER_DEFINE_INVALID",
-                    "message": f"Driver output must be a leaf account: {req.account!r}"},
+            detail={
+                "code": "DRIVER_DEFINE_INVALID",
+                "message": f"Driver output must be a leaf account: {req.account!r}",
+            },
         )
 
     # 2. Formula must parse.
@@ -78,31 +82,38 @@ def define_driver(
         if not dim_model.is_known("account", r):
             raise HTTPException(
                 status_code=400,
-                detail={"code": "DRIVER_REFERENCE_UNKNOWN",
-                        "message": f"Unknown account in formula: {r!r}"},
+                detail={
+                    "code": "DRIVER_REFERENCE_UNKNOWN",
+                    "message": f"Unknown account in formula: {r!r}",
+                },
             )
         if not dim_model.is_leaf("account", r):
             raise HTTPException(
                 status_code=400,
-                detail={"code": "DRIVER_REFERENCE_NON_LEAF",
-                        "message": f"Reference must be a leaf account: {r!r}"},
+                detail={
+                    "code": "DRIVER_REFERENCE_NON_LEAF",
+                    "message": f"Reference must be a leaf account: {r!r}",
+                },
             )
 
     # 4. Cycle check.
     if engine.would_cycle(req.account, set(refs)):
         raise HTTPException(
             status_code=400,
-            detail={"code": "DRIVER_CYCLE",
-                    "message": f"Adding {req.account!r} = {req.formula!r} creates a cycle"},
+            detail={
+                "code": "DRIVER_CYCLE",
+                "message": f"Adding {req.account!r} = {req.formula!r} creates a cycle",
+            },
         )
 
     # 5. Persist + materialize. Same atomicity model as /submit:
     #    SQLite transaction (audit + driver row + dim_member-style upserts) commits
     #    INSIDE the DuckDB transaction. Cube commits last.
     new_engine = CalcEngine(
-        [*[Driver(d, f, parse_formula(f)) for d, f in audit.fetch_drivers()
-           if d != req.account],
-         Driver(req.account, req.formula, ast)]
+        [
+            *[Driver(d, f, parse_formula(f)) for d, f in audit.fetch_drivers() if d != req.account],
+            Driver(req.account, req.formula, ast),
+        ]
     )
 
     with cube.transaction():
@@ -118,4 +129,41 @@ def define_driver(
         formula=req.formula,
         references=refs,
         initial_computed_count=initial_count,
+    )
+
+
+@router.delete("/drivers/{account}", response_model=DriverDeleteResponse)
+def delete_driver_endpoint(
+    account: str,
+    request_id: str,
+    audit: SQLiteMetadataStore = Depends(get_metadata),
+) -> DriverDeleteResponse:
+    """Undefine a driver. Prior computed facts stay in the cube (append-only);
+    future manual /submit calls to this account become legal again."""
+    formula = audit.fetch_driver(account)
+    if formula is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "DRIVER_NOT_DEFINED",
+                "message": f"No driver defined for account {account!r}",
+            },
+        )
+
+    audit_row = build_driver_change_audit_row(
+        request_id=request_id,
+        account=account,
+        action="undefine",
+        formula=formula,
+    )
+    with audit.transaction():
+        audit.delete_driver(account)
+        audit.append_audit_rows([audit_row])
+        audit_id = audit.last_audit_id()
+
+    return DriverDeleteResponse(
+        request_id=request_id,
+        account=account,
+        formula=formula,
+        audit_id=audit_id,
     )

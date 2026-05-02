@@ -1,5 +1,6 @@
 import { Combobox, Option, Field } from "@fluentui/react-components";
 import type { DimMemberInfo } from "../types/generated";
+import { buildTree, memberLabel } from "../excel/dim_tree";
 
 interface Props {
   label: string;
@@ -10,38 +11,7 @@ interface Props {
 }
 
 // Non-breaking space (U+00A0) survives HTML whitespace collapsing, unlike a regular space.
-const INDENT = "  ";
-
-interface TreeNode {
-  id: string;
-  depth: number;
-}
-
-function buildTree(members: DimMemberInfo[]): TreeNode[] {
-  const byParent = new Map<string | null, DimMemberInfo[]>();
-  for (const m of members) {
-    const p = m.parent ?? null;
-    const arr = byParent.get(p) ?? [];
-    arr.push(m);
-    byParent.set(p, arr);
-  }
-  const out: TreeNode[] = [];
-  function walk(parent: string | null, depth: number) {
-    const children = byParent.get(parent) ?? [];
-    for (const m of children) {
-      out.push({ id: m.id, depth });
-      walk(m.id, depth + 1);
-    }
-  }
-  walk(null, 0);
-  if (out.length < members.length) {
-    const seen = new Set(out.map((n) => n.id));
-    for (const m of members) {
-      if (!seen.has(m.id)) out.push({ id: m.id, depth: 0 });
-    }
-  }
-  return out;
-}
+const INDENT = "  ";
 
 /**
  * Multi-select picker for one dim. Hierarchy-aware: parents render above their
@@ -50,6 +20,8 @@ function buildTree(members: DimMemberInfo[]): TreeNode[] {
  *
  * Empty selection means "no filter on this dim" (all leaves). For non-axis dims,
  * App.tsx's refresh-gate enforces "exactly one selection".
+ *
+ * Slice 9: option text uses `display_name` if set, falling back to id.
  */
 export function MultiMemberPicker({
   label,
@@ -69,8 +41,8 @@ export function MultiMemberPicker({
         onOptionSelect={(_e, data) => onChange(data.selectedOptions)}
       >
         {tree.map((n) => (
-          <Option key={n.id} value={n.id} text={n.id}>
-            {INDENT.repeat(n.depth) + n.id}
+          <Option key={n.id} value={n.id} text={memberLabel(n)}>
+            {INDENT.repeat(n.depth) + memberLabel(n)}
           </Option>
         ))}
       </Combobox>

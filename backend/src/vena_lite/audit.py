@@ -3,9 +3,14 @@
 
 Decimals serialize to TEXT (matches schema.sql comment). `None` for `before_value`
 is the explicit "no previous fact existed" signal.
+
+Slice 9: `details` is a JSON column for non-submit kinds (dim_change,
+driver_change). For submit-style rows it stays None.
 """
+
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from .metadata.store import AuditRow
@@ -52,6 +57,74 @@ def build_audit_rows(
                 _fmt(before),
                 _fmt(cell.value) or "",  # after_value is non-null per schema
                 source,
+                None,  # details
             )
         )
     return rows
+
+
+def build_dim_change_audit_row(
+    *,
+    request_id: str,
+    dim: str,
+    member: str,
+    field: str,
+    before: object,
+    after: object,
+    who: str = "local",
+) -> AuditRow:
+    """Audit row for a dim_member CRUD event.
+
+    Reuses the submit intersection columns as sentinels: account_id=dim,
+    entity_id=member, others="" (NOT NULL satisfied). `before_value`/`after_value`
+    carry the field's old/new value as strings; `details` JSON has the structured
+    record for downstream consumers.
+    """
+    details = json.dumps(
+        {"dim": dim, "member": member, "field": field, "before": before, "after": after},
+        separators=(",", ":"),
+        default=str,
+    )
+    return (
+        request_id,
+        who,
+        dim,
+        member,
+        "",
+        "",
+        "",
+        "",
+        None if before is None else str(before),
+        "" if after is None else str(after),
+        "dim_change",
+        details,
+    )
+
+
+def build_driver_change_audit_row(
+    *,
+    request_id: str,
+    account: str,
+    action: str,
+    formula: str | None,
+    who: str = "local",
+) -> AuditRow:
+    """Audit row for a driver definition or removal."""
+    details = json.dumps(
+        {"account": account, "action": action, "formula": formula},
+        separators=(",", ":"),
+    )
+    return (
+        request_id,
+        who,
+        account,
+        "",
+        "",
+        "",
+        "",
+        "",
+        None,
+        formula or "",
+        "driver_change",
+        details,
+    )
