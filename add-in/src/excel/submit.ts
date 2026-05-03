@@ -1,10 +1,11 @@
 import type { SubmittedCell } from "../types/generated";
 import { DIM_NAMES, type DimName } from "../types/dims";
+import { type AxisSpec } from "./axes";
 import type { PageFilters } from "./pivot";
 
 export interface LayoutDescriptor {
-  rowAxis: DimName | null;
-  colAxis: DimName | null;
+  rows: DimName[];
+  cols: DimName[];
   pageFilters: PageFilters;
 }
 
@@ -12,14 +13,15 @@ export interface LayoutDescriptor {
  * Read the active worksheet's used range and project each data cell into a
  * `SubmittedCell` using the active layout.
  *
- * Long-format (rowAxis=null && colAxis=null): cols 0..6 are the dim
- * intersection + value, header at row 0. (Same as Slice 7 behavior.)
+ * Long-format (rows=[] && cols=[]): cols 0..6 are the dim intersection +
+ * value, header at row 0. (Same as Slice 7 behavior.)
  *
- * Pivot (any axis set): row 0 is the title strip, row 1 is the column header
- * (col A = row-axis dim name, cols B..N = col-axis member ids), rows 2..M+1
- * are data. Each non-empty data cell yields one SubmittedCell with:
- *   - rowAxis dim member from col A
- *   - colAxis dim member from the header at that column (single-axis: omitted)
+ * Pivot (any axis non-empty): row 0 is the title strip, rows 1..N (N =
+ * cols.length || 1) are column headers (the LAST col header row also
+ * carries the row dim names in the row-label cols), rows N+1.. are data.
+ * Each non-empty data cell yields one SubmittedCell with:
+ *   - row dim members from the leading rows.length columns
+ *   - col dim members from the (cols.length || 1) header rows above
  *   - other dims from layout.pageFilters
  *
  * Empty value cells are skipped (matches the v1 "blank = no change" rule).
@@ -39,7 +41,7 @@ export async function readCurrentValuesFromActiveSheet(
 
     const matrix = used.values as (string | number | boolean | null)[][];
 
-    if (!layout.rowAxis && !layout.colAxis) {
+    if (layout.rows.length === 0 && layout.cols.length === 0) {
       return readLongFormat(matrix, rowCount, colCount);
     }
     return readPivot(matrix, rowCount, colCount, layout);
@@ -74,52 +76,77 @@ function readPivot(
   colCount: number,
   layout: LayoutDescriptor,
 ): SubmittedCell[] {
-  if (rowCount < 3 || colCount < 2) return [];
-
-  // Mirror pivot.ts normalization: col-only axis is treated as row-only.
-  let rowAxis = layout.rowAxis;
-  let colAxis = layout.colAxis;
-  if (!rowAxis && colAxis) {
-    rowAxis = colAxis;
-    colAxis = null;
+  // Mirror pivot.ts normalization: rows-empty + cols-non-empty becomes rows-only.
+  let rowAxes: AxisSpec["rows"] = layout.rows;
+  let colAxes: AxisSpec["cols"] = layout.cols;
+  if (rowAxes.length === 0 && colAxes.length > 0) {
+    rowAxes = colAxes;
+    colAxes = [];
   }
-  if (!rowAxis) return [];
+  if (rowAxes.length === 0) return [];
 
-  const headerRow = matrix[1];
-  const colMembers: string[] = [];
-  for (let c = 1; c < colCount; c++) {
-    colMembers.push(String(headerRow[c] ?? ""));
+  const rowsLen = rowAxes.length;
+  const colsLen = colAxes.length;
+  const colHeaderCount = Math.max(1, colsLen);
+  const dataStartRow = 1 + colHeaderCount;
+  const dataStartCol = rowsLen;
+
+  if (rowCount < dataStartRow + 1) return [];
+  if (colCount < dataStartCol + 1) return [];
+
+  // Parse col tuples from the col header rows. Each value column carries
+  // a tuple of colsLen members. In rows-only mode (colsLen === 0) we use a
+  // single placeholder tuple.
+  const colTuples: string[][] = [];
+  for (let c = dataStartCol; c < colCount; c++) {
+    if (colsLen === 0) {
+      colTuples.push([]);
+    } else {
+      const tuple: string[] = [];
+      for (let depth = 0; depth < colsLen; depth++) {
+        tuple.push(String(matrix[1 + depth]?.[c] ?? ""));
+      }
+      colTuples.push(tuple);
+    }
   }
 
   const out: SubmittedCell[] = [];
-  for (let r = 2; r < rowCount; r++) {
+  for (let r = dataStartRow; r < rowCount; r++) {
     const dataRow = matrix[r];
-    const rowMember = String(dataRow[0] ?? "");
-    if (!rowMember) continue;
+    if (!dataRow) continue;
 
-    if (!colAxis) {
-      const value = String(dataRow[1] ?? "").trim();
-      if (!value) continue;
-      out.push(buildCell(rowAxis, rowMember, null, "", layout.pageFilters, value));
-      continue;
+    const rowTuple: string[] = [];
+    let allBlank = true;
+    for (let i = 0; i < rowsLen; i++) {
+      const v = String(dataRow[i] ?? "");
+      rowTuple.push(v);
+      if (v) allBlank = false;
     }
+    if (allBlank) continue;
 
-    for (let c = 1; c < colCount; c++) {
-      const colMember = colMembers[c - 1];
-      if (!colMember) continue;
+    for (let c = dataStartCol; c < colCount; c++) {
+      const colIdx = c - dataStartCol;
+      const colTuple = colTuples[colIdx];
+      // In pivot-with-cols mode, skip cols whose header tuple is entirely blank
+      // (would indicate a stray sheet column past the data).
+      if (colsLen > 0 && colTuple.every((m) => !m)) continue;
+
       const value = String(dataRow[c] ?? "").trim();
       if (!value) continue;
-      out.push(buildCell(rowAxis, rowMember, colAxis, colMember, layout.pageFilters, value));
+
+      out.push(
+        buildCell(rowAxes, rowTuple, colAxes, colTuple, layout.pageFilters, value),
+      );
     }
   }
   return out;
 }
 
 function buildCell(
-  rowAxis: DimName,
-  rowMember: string,
-  colAxis: DimName | null,
-  colMember: string,
+  rowAxes: DimName[],
+  rowTuple: string[],
+  colAxes: DimName[],
+  colTuple: string[],
   pageFilters: PageFilters,
   value: string,
 ): SubmittedCell {
@@ -132,10 +159,14 @@ function buildCell(
     version: "",
     value,
   };
-  cell[rowAxis] = rowMember;
-  if (colAxis) cell[colAxis] = colMember;
+  for (let i = 0; i < rowAxes.length; i++) {
+    cell[rowAxes[i]] = rowTuple[i] ?? "";
+  }
+  for (let i = 0; i < colAxes.length; i++) {
+    cell[colAxes[i]] = colTuple[i] ?? "";
+  }
   for (const d of DIM_NAMES) {
-    if (d === rowAxis || d === colAxis) continue;
+    if (rowAxes.includes(d) || colAxes.includes(d)) continue;
     cell[d] = pageFilters[d] ?? "";
   }
   return cell;

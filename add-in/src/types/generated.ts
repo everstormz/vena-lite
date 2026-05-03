@@ -109,6 +109,41 @@ export interface FactRow {
   version: string;
   value: string;
 }
+export interface OverrideIntersection {
+  account: string;
+  entity: string;
+  costcenter: string;
+  period: string;
+  scenario: string;
+  version: string;
+}
+export interface OverrideReleaseRequest {
+  request_id: string;
+  /**
+   * @minItems 1
+   */
+  cells: [OverrideIntersection, ...OverrideIntersection[]];
+}
+export interface OverrideRequest {
+  request_id: string;
+  /**
+   * @minItems 1
+   */
+  cells: [SubmittedCell, ...SubmittedCell[]];
+}
+export interface SubmittedCell {
+  account: string;
+  entity: string;
+  costcenter: string;
+  period: string;
+  scenario: string;
+  version: string;
+  value: string;
+}
+export interface OverrideResponse {
+  request_id: string;
+  accepted_count: number;
+}
 export interface ScenarioCopyRequest {
   request_id: string;
   source: ScenarioRef;
@@ -141,7 +176,11 @@ export interface SubmitRequest {
    */
   cells: [SubmittedCell, ...SubmittedCell[]];
 }
-export interface SubmittedCell {
+export interface SubmitResponse {
+  request_id: string;
+  accepted_count: number;
+}
+export interface ValueResponse {
   account: string;
   entity: string;
   costcenter: string;
@@ -149,8 +188,6 @@ export interface SubmittedCell {
   scenario: string;
   version: string;
   value: string;
-}
-export interface SubmitResponse {
-  request_id: string;
-  accepted_count: number;
+  source: string;
+  loaded_at: string;
 }

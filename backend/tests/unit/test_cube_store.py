@@ -152,3 +152,42 @@ def test_bulk_insert_round_trips_a_single_row(empty_store: DuckDBCubeStore):
     rows = empty_store.slice({})
     assert len(rows) == 1
     assert rows[0].value == Decimal("7.000000")
+
+
+def test_lookup_overrides_returns_only_currently_overridden(
+    empty_store: DuckDBCubeStore,
+):
+    """Submit row at k1; override at k2; override-then-release at k3.
+    lookup_overrides returns only k2 — k1 is a regular submit, k3's latest
+    is a release row, so it is no longer overridden.
+    """
+    k1 = ("A1", "E", "C", "2026-01", "Actual", "v1")
+    k2 = ("A2", "E", "C", "2026-01", "Actual", "v1")
+    k3 = ("A3", "E", "C", "2026-01", "Actual", "v1")
+
+    empty_store.bulk_insert([(*k1, Decimal("10.000000"))], source="submit:r1")
+    empty_store.bulk_insert([(*k2, Decimal("20.000000"))], source="override:r2")
+    empty_store.bulk_insert([(*k3, Decimal("30.000000"))], source="override:r3")
+    empty_store._conn.execute(  # noqa: SLF001
+        """INSERT INTO facts (account_id, entity_id, costcenter_id, period_id,
+           scenario_id, version_id, value, loaded_at, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NOW() + INTERVAL 1 SECOND, 'driver:released:r4')""",
+        [*k3, Decimal("3.000000")],
+    )
+
+    overrides = empty_store.lookup_overrides([k1, k2, k3])
+    assert overrides == {k2}
+
+
+def test_lookup_overrides_empty_input_returns_empty_set(
+    empty_store: DuckDBCubeStore,
+):
+    assert empty_store.lookup_overrides([]) == set()
+
+
+def test_lookup_overrides_no_match_returns_empty_set(
+    seeded_store: DuckDBCubeStore,
+):
+    """Seeded data uses source='seed_v1' — no overrides exist."""
+    k = (ACCOUNTS[0], ENTITIES[0], COSTCENTERS[0], "2026-01", "Actual", "v1")
+    assert seeded_store.lookup_overrides([k]) == set()

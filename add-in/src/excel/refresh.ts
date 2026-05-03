@@ -1,5 +1,5 @@
 import type { FactRow } from "../types/generated";
-import type { DimName } from "../types/dims";
+import { type AxisSpec } from "./axes";
 import { buildPivot, type PageFilters } from "./pivot";
 
 const DRIVER_FILL = "#F3F2F1"; // Fluent neutral background
@@ -22,18 +22,17 @@ const CLEAR_COLS = 50;
  * axis (if any) holds the account dim; see buildPivot.
  *
  * Layout cases:
- *  - rowAxis=null && colAxis=null → today's 7-column long-format fallback.
- *  - rowAxis only → 2-column [rowDim | value] table with a title row above.
- *  - both axes → title row + header row + data rows.
+ *  - axes.rows == [] && axes.cols == [] → 7-column long-format fallback.
+ *  - axes.rows == [] && axes.cols != [] → normalized to rows-only.
+ *  - otherwise → title row + (cols.length || 1) header rows + data rows.
  */
 export async function writeFactsToActiveSheet(
   rows: FactRow[],
-  rowAxis: DimName | null,
-  colAxis: DimName | null,
+  axes: AxisSpec,
   pageFilters: PageFilters,
   driverAccounts: ReadonlySet<string> = new Set(),
 ): Promise<void> {
-  const pivot = buildPivot(rows, rowAxis, colAxis, pageFilters, driverAccounts);
+  const pivot = buildPivot(rows, axes, pageFilters, driverAccounts);
   const totalRows = pivot.matrix.length;
   const totalCols = pivot.matrix[0]?.length ?? 0;
   if (totalRows === 0 || totalCols === 0) return;
@@ -47,7 +46,9 @@ export async function writeFactsToActiveSheet(
     const range = sheet.getRangeByIndexes(0, 0, totalRows, totalCols);
     range.values = pivot.matrix;
 
-    sheet.getRangeByIndexes(pivot.headerRowIndex, 0, 1, totalCols).format.font.bold = true;
+    sheet
+      .getRangeByIndexes(0, 0, pivot.headerRowCount, totalCols)
+      .format.font.bold = true;
 
     for (const fill of pivot.driverFillCoords) {
       sheet.getRangeByIndexes(fill.row, fill.col, fill.rows, fill.cols).format.fill.color = DRIVER_FILL;

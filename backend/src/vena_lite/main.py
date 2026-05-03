@@ -7,9 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import dimensions as dimensions_api
 from .api import drivers as drivers_api
+from .api import overrides as overrides_api
 from .api import scenarios as scenarios_api
 from .api import slice as slice_api
 from .api import submit as submit_api
+from .api import values as values_api
 
 app = FastAPI(title="Vena-lite", version="0.1.0")
 
@@ -33,6 +35,8 @@ app.include_router(submit_api.router)
 app.include_router(scenarios_api.router)
 app.include_router(drivers_api.router)
 app.include_router(dimensions_api.router)
+app.include_router(overrides_api.router)
+app.include_router(values_api.router)
 
 
 @app.get("/health")

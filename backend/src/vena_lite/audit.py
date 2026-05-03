@@ -101,6 +101,41 @@ def build_dim_change_audit_row(
     )
 
 
+def build_override_release_audit_rows(
+    cells: list[SubmittedCell],
+    before_values: dict[IntersectionKey, Decimal | None],
+    request_id: str,
+    who: str = "local",
+) -> list[AuditRow]:
+    """Audit rows for the DELETE /overrides path. Same shape as a regular
+    submit row but with source='override' and details={"action":"release"}.
+    `before_value` should be the override value being released; `cell.value`
+    is the freshly computed formula value.
+    """
+    details = json.dumps({"action": "release"}, separators=(",", ":"))
+    rows: list[AuditRow] = []
+    for cell in cells:
+        key = intersection_key(cell)
+        before = before_values.get(key)
+        rows.append(
+            (
+                request_id,
+                who,
+                cell.account,
+                cell.entity,
+                cell.costcenter,
+                cell.period,
+                cell.scenario,
+                cell.version,
+                _fmt(before),
+                _fmt(cell.value) or "",
+                "override",
+                details,
+            )
+        )
+    return rows
+
+
 def build_driver_change_audit_row(
     *,
     request_id: str,

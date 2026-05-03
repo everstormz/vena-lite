@@ -38,12 +38,13 @@ import {
   storeFilterState,
   type FilterState,
 } from "./excel/filters";
+import type { AxisSpec } from "./excel/axes";
 import type { PageFilters } from "./excel/pivot";
 import { CopyScenarioPanel } from "./components/CopyScenarioPanel";
 import { DefineDriverPanel } from "./components/DefineDriverPanel";
 import { DimensionManagerPanel } from "./components/DimensionManagerPanel";
-import { FilterStrip } from "./components/FilterStrip";
-import { AxisPicker } from "./components/AxisPicker";
+import { AxisDesigner } from "./components/AxisDesigner";
+import { OverridePanel } from "./components/OverridePanel";
 import type { DimMemberInfo, DriverInfo, SubmittedCell } from "./types/generated";
 import { DIM_NAMES, type DimName } from "./types/dims";
 
@@ -55,12 +56,6 @@ const useStyles = makeStyles({
     padding: tokens.spacingHorizontalL,
     fontFamily: tokens.fontFamilyBase,
   },
-  axisRow: {
-    display: "flex",
-    flexDirection: "row",
-    gap: tokens.spacingHorizontalS,
-  },
-  axisPicker: { flex: 1 },
   buttonRow: {
     display: "flex",
     gap: tokens.spacingHorizontalS,
@@ -99,9 +94,10 @@ function preferredDefault(members: DimMemberInfo[], preferred: string): string {
 }
 
 function buildPageFilters(state: FilterState): PageFilters {
+  const onAxis = new Set<DimName>([...state.axes.rows, ...state.axes.cols]);
   const out: PageFilters = {};
   for (const d of DIM_NAMES) {
-    if (d === state.rowAxis || d === state.colAxis) continue;
+    if (onAxis.has(d)) continue;
     if (state.filters[d].length === 1) out[d] = state.filters[d][0];
   }
   return out;
@@ -113,10 +109,13 @@ interface ValidationResult {
 }
 
 function validateRefresh(state: FilterState): ValidationResult {
-  if (!state.rowAxis && !state.colAxis) return { valid: true, reason: "" };
+  if (state.axes.rows.length === 0 && state.axes.cols.length === 0) {
+    return { valid: true, reason: "" };
+  }
+  const onAxis = new Set<DimName>([...state.axes.rows, ...state.axes.cols]);
   const unconstrained: string[] = [];
   for (const d of DIM_NAMES) {
-    if (d === state.rowAxis || d === state.colAxis) continue;
+    if (onAxis.has(d)) continue;
     if (state.filters[d].length !== 1) unconstrained.push(d);
   }
   if (unconstrained.length === 0) return { valid: true, reason: "" };
@@ -145,6 +144,37 @@ function validateSubmit(
     valid: false,
     reason: `Non-leaf selections cannot submit: ${offending.join(", ")}`,
   };
+}
+
+/**
+ * Pre-pick the first leaf member for each non-axis dim that has no
+ * selection yet. Run once on first load so Refresh is enabled out of the
+ * box; user-edited filters survive (we only fill empties).
+ */
+function autoFillDefaults(
+  state: FilterState,
+  byName: Partial<Record<DimName, DimMemberInfo[]>>,
+): FilterState {
+  const onAxis = new Set<DimName>([...state.axes.rows, ...state.axes.cols]);
+  let touched = false;
+  const filters = { ...state.filters };
+  for (const d of DIM_NAMES) {
+    if (onAxis.has(d)) continue;
+    if ((filters[d] ?? []).length > 0) continue;
+    const firstLeaf = (byName[d] ?? []).find((m) => m.is_leaf);
+    if (firstLeaf) {
+      filters[d] = [firstLeaf.id];
+      touched = true;
+    }
+  }
+  return touched ? { ...state, filters } : state;
+}
+
+function describeAxes(axes: AxisSpec): string {
+  if (axes.rows.length === 0 && axes.cols.length === 0) return "long-format";
+  const rows = axes.rows.length === 0 ? "(none)" : axes.rows.join(" × ");
+  const cols = axes.cols.length === 0 ? "(none)" : axes.cols.join(" × ");
+  return `${rows} × ${cols}`;
 }
 
 export default function App() {
@@ -190,7 +220,8 @@ export default function App() {
         const byName = await reloadDropdowns();
         const persisted = loadFilterState();
         const { state: cleaned, droppedCount } = dropUnknownMembers(persisted, byName);
-        setFilterState(cleaned);
+        const seeded = autoFillDefaults(cleaned, byName);
+        setFilterState(seeded);
         if (droppedCount > 0) {
           setStatus({
             kind: "ok",
@@ -214,11 +245,8 @@ export default function App() {
       filters: { ...prev.filters, [dim]: next },
     }));
   }
-  function setRowAxis(next: DimName | null) {
-    setFilterState((prev) => ({ ...prev, rowAxis: next }));
-  }
-  function setColAxis(next: DimName | null) {
-    setFilterState((prev) => ({ ...prev, colAxis: next }));
+  function setAxes(next: AxisSpec) {
+    setFilterState((prev) => ({ ...prev, axes: next }));
   }
 
   async function onRefresh() {
@@ -236,27 +264,22 @@ export default function App() {
       const pageFilters = buildPageFilters(filterState);
       await writeFactsToActiveSheet(
         resp.rows,
-        filterState.rowAxis,
-        filterState.colAxis,
+        filterState.axes,
         pageFilters,
         driverAccounts,
       );
       await storeBaseline(buildBaseline(resp.rows));
       await storeFilterState(filterState);
       const layout: LayoutDescriptor = {
-        rowAxis: filterState.rowAxis,
-        colAxis: filterState.colAxis,
+        rows: filterState.axes.rows,
+        cols: filterState.axes.cols,
         pageFilters,
       };
       setLastLayout(layout);
       const ms = Math.round(performance.now() - t0);
-      const layoutDesc =
-        filterState.rowAxis || filterState.colAxis
-          ? `${filterState.rowAxis ?? "(none)"} × ${filterState.colAxis ?? "(none)"}`
-          : "long-format";
       setStatus({
         kind: "ok",
-        message: `Refreshed ${resp.total} cells, ${layoutDesc}, ${ms} ms.`,
+        message: `Refreshed ${resp.total} cells, ${describeAxes(filterState.axes)}, ${ms} ms.`,
       });
     } catch (err) {
       setStatus({ kind: "error", message: errMsg(err) });
@@ -303,6 +326,8 @@ export default function App() {
         next[k] = d.value;
       }
       await storeBaseline(next);
+      // Refresh =VENA cells anywhere in the workbook.
+      await triggerWorkbookRecalc();
       setStatus({
         kind: "ok",
         message: `Submitted ${resp.accepted_count} change${resp.accepted_count === 1 ? "" : "s"}. Refresh to see driver recompute.`,
@@ -333,13 +358,6 @@ export default function App() {
       : preferredDefault(versions, "v1");
   const accountForDriverDefault = preferredDefault(accounts, accounts[0]?.id ?? "");
 
-  const rowAxisDisabled = new Set<DimName>(
-    filterState.colAxis ? [filterState.colAxis] : [],
-  );
-  const colAxisDisabled = new Set<DimName>(
-    filterState.rowAxis ? [filterState.rowAxis] : [],
-  );
-
   const refreshDisabled = busy || !refreshValidation.valid;
   const submitDisabled = busy || !lastLayout || !submitValidation.valid;
   const submitReason = !lastLayout
@@ -360,33 +378,14 @@ export default function App() {
 
       {!initLoading && (
         <>
-          <FilterStrip
-            dimensionsByName={dimensionsByName}
+          <AxisDesigner
             filters={filterState.filters}
-            onChange={setFilter}
+            axes={filterState.axes}
+            dimensionsByName={dimensionsByName}
+            onFilterChange={setFilter}
+            onAxesChange={setAxes}
             disabled={busy}
           />
-
-          <div className={styles.axisRow}>
-            <div className={styles.axisPicker}>
-              <AxisPicker
-                label="Rows"
-                value={filterState.rowAxis}
-                onChange={setRowAxis}
-                disabledDims={rowAxisDisabled}
-                disabled={busy}
-              />
-            </div>
-            <div className={styles.axisPicker}>
-              <AxisPicker
-                label="Columns"
-                value={filterState.colAxis}
-                onChange={setColAxis}
-                disabledDims={colAxisDisabled}
-                disabled={busy}
-              />
-            </div>
-          </div>
 
           <div className={styles.buttonRow}>
             <Button appearance="primary" disabled={refreshDisabled} onClick={onRefresh}>
@@ -456,6 +455,18 @@ export default function App() {
                 />
               </AccordionPanel>
             </AccordionItem>
+            <AccordionItem value="override">
+              <AccordionHeader>Override cell</AccordionHeader>
+              <AccordionPanel>
+                <OverridePanel
+                  layout={lastLayout}
+                  driverAccounts={driverAccounts}
+                  onChanged={() => {
+                    void reloadDropdowns();
+                  }}
+                />
+              </AccordionPanel>
+            </AccordionItem>
           </Accordion>
         </>
       )}
@@ -493,4 +504,13 @@ export default function App() {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+async function triggerWorkbookRecalc(): Promise<void> {
+  // Force Excel to re-evaluate all =VENA(...) custom-function cells. Excel
+  // would otherwise cache results until inputs change.
+  await Excel.run(async (ctx) => {
+    ctx.workbook.application.calculate("Full");
+    await ctx.sync();
+  });
 }

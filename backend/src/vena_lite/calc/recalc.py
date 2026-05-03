@@ -32,6 +32,7 @@ def compute_driver_cells(
     cube: DuckDBCubeStore,
     affected_accounts: list[str],
     target_keys: Iterable[NonAccountKey],
+    overrides: set[IntersectionKey] | None = None,
 ) -> list[SubmittedCell]:
     """For each (driver_account, target_key), look up the inputs in the cube
     (sees uncommitted writes within the same DuckDB transaction) and evaluate.
@@ -39,8 +40,16 @@ def compute_driver_cells(
     Missing input facts default to Decimal(0). Order matters: `affected_accounts`
     must already be topo-sorted so a driver that consumes another driver's
     output sees the freshly-computed value.
+
+    Slice 11: `overrides` is the set of `(account, *tkey)` intersections whose
+    latest cube fact is a manual override. We do NOT compute a new driver row
+    at those intersections — the override is the current value. Downstream
+    drivers that consume this account at this intersection will see the
+    override via `cube.lookup_current_values` (it's in `facts_current`), so
+    cascade still works correctly.
     """
     target_list = list(target_keys)
+    overrides = overrides or set()
     out_cells: list[SubmittedCell] = []
     just_computed: dict[IntersectionKey, Decimal] = {}
 
@@ -48,17 +57,21 @@ def compute_driver_cells(
         driver = engine.get(account)
         refs = driver.references()
         for tkey in target_list:
+            ik = _attach_account(account, tkey)
+            if ik in overrides:
+                # Override holds the floor for this cell — skip computing.
+                continue
             ref_keys = [_attach_account(r, tkey) for r in refs]
             cube_values = cube.lookup_current_values(ref_keys)
             ctx: dict[str, Decimal] = {}
             for r in refs:
-                ik = _attach_account(r, tkey)
+                ref_ik = _attach_account(r, tkey)
                 # Prefer a value just computed earlier in this batch over the
                 # cube — the cube hasn't seen our INSERT yet within Python.
-                if ik in just_computed:
-                    ctx[r] = just_computed[ik]
+                if ref_ik in just_computed:
+                    ctx[r] = just_computed[ref_ik]
                 else:
-                    v = cube_values.get(ik)
+                    v = cube_values.get(ref_ik)
                     ctx[r] = Decimal(0) if v is None else v
             try:
                 value = driver.ast.evaluate(ctx)
@@ -74,7 +87,7 @@ def compute_driver_cells(
                 value=value,
             )
             out_cells.append(cell)
-            just_computed[_attach_account(account, tkey)] = value
+            just_computed[ik] = value
 
     return out_cells
 
@@ -97,7 +110,13 @@ def recalc_for_submit(
         return 0
 
     target_keys = sorted({_strip_account(intersection_key(c)) for c in submitted_cells})
-    driver_cells = compute_driver_cells(engine, cube, affected, target_keys)
+    candidate_intersections = [
+        _attach_account(a, tkey) for a in affected for tkey in target_keys
+    ]
+    overrides = cube.lookup_overrides(candidate_intersections)
+    driver_cells = compute_driver_cells(
+        engine, cube, affected, target_keys, overrides=overrides
+    )
     if not driver_cells:
         return 0
 
@@ -142,7 +161,13 @@ def recalc_for_initial_define(
     if new_driver_account not in affected:
         affected = [new_driver_account] + affected
 
-    driver_cells = compute_driver_cells(engine, cube, affected, target_keys)
+    candidate_intersections = [
+        _attach_account(a, tkey) for a in affected for tkey in target_keys
+    ]
+    overrides = cube.lookup_overrides(candidate_intersections)
+    driver_cells = compute_driver_cells(
+        engine, cube, affected, target_keys, overrides=overrides
+    )
     if not driver_cells:
         return 0
 

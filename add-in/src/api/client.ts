@@ -8,12 +8,16 @@ import type {
   DriverDefineResponse,
   DriverDeleteResponse,
   DriverListResponse,
+  OverrideReleaseRequest,
+  OverrideRequest,
+  OverrideResponse,
   ScenarioCopyRequest,
   ScenarioCopyResponse,
   SliceRequest,
   SliceResponse,
   SubmitRequest,
   SubmitResponse,
+  ValueResponse,
 } from "../types/generated";
 import type { DimName } from "../types/dims";
 
@@ -58,6 +62,19 @@ async function patchJson<T>(path: string, body: unknown): Promise<T> {
 
 async function deleteJson<T>(path: string): Promise<T> {
   const r = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`DELETE ${path} failed: ${r.status} ${r.statusText} ${text}`);
+  }
+  return (await r.json()) as T;
+}
+
+async function deleteJsonWithBody<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`DELETE ${path} failed: ${r.status} ${r.statusText} ${text}`);
@@ -132,6 +149,32 @@ export function deleteDriver(
   return deleteJson<DriverDeleteResponse>(
     `/drivers/${encodeURIComponent(account)}?${qs}`,
   );
+}
+
+// --- Slice 11: linked cells + per-intersection overrides -------------
+
+export interface ValueIntersection {
+  account: string;
+  entity: string;
+  costcenter: string;
+  period: string;
+  scenario: string;
+  version: string;
+}
+
+export function fetchValue(inter: ValueIntersection): Promise<ValueResponse> {
+  const qs = new URLSearchParams(inter as unknown as Record<string, string>).toString();
+  return getJson<ValueResponse>(`/value?${qs}`);
+}
+
+export function postOverride(req: OverrideRequest): Promise<OverrideResponse> {
+  return postJson<OverrideResponse>("/overrides", req);
+}
+
+export function releaseOverride(
+  req: OverrideReleaseRequest,
+): Promise<OverrideResponse> {
+  return deleteJsonWithBody<OverrideResponse>("/overrides", req);
 }
 
 // --- helpers ---------------------------------------------------------

@@ -1,5 +1,6 @@
 import type { FactRow } from "../types/generated";
 import type { DimName } from "../types/dims";
+import { type AxisSpec, tupleKey } from "./axes";
 
 export type PageFilters = Partial<Record<DimName, string>>;
 
@@ -13,7 +14,7 @@ export interface FillCoord {
 export interface PivotResult {
   matrix: (string | number)[][];
   driverFillCoords: FillCoord[];
-  headerRowIndex: number;
+  headerRowCount: number;
 }
 
 const LONG_FORMAT_HEADERS = [
@@ -29,37 +30,31 @@ const VALUE_LABEL = "value";
 const VALUE_COL_LONG = LONG_FORMAT_HEADERS.indexOf(VALUE_LABEL);
 
 /**
- * Build the matrix to write to the active sheet, given backend slice rows
- * and the active layout.
+ * Build the matrix to write to the active sheet.
  *
- * Cases:
- *  - No axis: long-format fallback (today's 7-column layout).
- *  - Row axis only: 2-column [rowDim | value] table. Page filter assignments
- *    appear in a title row above the header.
- *  - Both axes: title row + header row + data rows. The (rowMember, colMember)
- *    pair must uniquely identify a fact — App.tsx's refresh-gate enforces
- *    "exactly one selection per non-axis dim" so the backend response is
- *    collision-free here.
+ *   axes.rows = [], axes.cols = [] → long-format fallback (7 cols).
+ *   axes.rows = [], axes.cols = [...] → cols-only normalizes to rows-only.
+ *   otherwise → title row + (cols.length || 1) header rows + data rows.
  *
- * Driver gray-fill coordinates depend on where account lives (row axis,
- * col axis, or page filter) — see Slice 8 plan, Edge cases section.
+ * Stacked axes use lexicographic tuple ordering for both rows and cols.
+ * The (rowTuple, colTuple) pair must uniquely identify a fact —
+ * App.tsx's refresh-gate (exactly one selection per non-axis dim)
+ * keeps the backend response collision-free.
  */
 export function buildPivot(
   rows: FactRow[],
-  rowAxis: DimName | null,
-  colAxis: DimName | null,
+  axes: AxisSpec,
   pageFilters: PageFilters,
   driverAccounts: ReadonlySet<string>,
 ): PivotResult {
-  // Col-only is just row-only with a different label for the user; normalize.
-  if (!rowAxis && colAxis) {
-    rowAxis = colAxis;
-    colAxis = null;
-  }
-  if (!rowAxis) {
+  if (axes.rows.length === 0 && axes.cols.length === 0) {
     return buildLongFormat(rows, driverAccounts);
   }
-  return buildPivotMatrix(rows, rowAxis, colAxis, pageFilters, driverAccounts);
+  const normalized: AxisSpec =
+    axes.rows.length === 0
+      ? { rows: axes.cols, cols: [] }
+      : axes;
+  return buildPivotMatrix(rows, normalized, pageFilters, driverAccounts);
 }
 
 function buildLongFormat(
@@ -84,95 +79,170 @@ function buildLongFormat(
       driverFillCoords.push({ row: i + 1, col: VALUE_COL_LONG, rows: 1, cols: 1 });
     }
   });
-  return { matrix, driverFillCoords, headerRowIndex: 0 };
+  return { matrix, driverFillCoords, headerRowCount: 1 };
 }
 
 function buildPivotMatrix(
-  rows: FactRow[],
-  rowAxis: DimName,
-  colAxis: DimName | null,
+  factRows: FactRow[],
+  axes: AxisSpec,
   pageFilters: PageFilters,
   driverAccounts: ReadonlySet<string>,
 ): PivotResult {
-  const rowMembers = uniqueSorted(rows.map((r) => r[rowAxis]));
-  const colMembers = colAxis
-    ? uniqueSorted(rows.map((r) => r[colAxis]))
-    : [VALUE_LABEL];
+  const rowsLen = axes.rows.length;
+  const colsLen = axes.cols.length;
 
+  const uniqRowTuples = new Map<string, string[]>();
+  const uniqColTuples = new Map<string, string[]>();
   const cellMap = new Map<string, FactRow>();
-  for (const r of rows) {
-    const rk = r[rowAxis];
-    const ck = colAxis ? r[colAxis] : VALUE_LABEL;
-    cellMap.set(`${rk}|${ck}`, r);
+
+  for (const f of factRows) {
+    const rt = axes.rows.map((d) => f[d]);
+    const ct = axes.cols.map((d) => f[d]);
+    const rk = tupleKey(rt);
+    const ck = tupleKey(ct);
+    if (!uniqRowTuples.has(rk)) uniqRowTuples.set(rk, rt);
+    if (colsLen > 0 && !uniqColTuples.has(ck)) uniqColTuples.set(ck, ct);
+    cellMap.set(`${rk}||${ck}`, f);
   }
+
+  const sortedRows = Array.from(uniqRowTuples.values()).sort(compareTuples);
+  const sortedCols =
+    colsLen > 0
+      ? Array.from(uniqColTuples.values()).sort(compareTuples)
+      : [[VALUE_LABEL]];
+
+  const colHeaderCount = Math.max(1, colsLen);
+  const headerRowCount = 1 + colHeaderCount;
+  const totalCols = rowsLen + sortedCols.length;
 
   const titleStr = Object.entries(pageFilters)
     .map(([k, v]) => `${k}=${v}`)
     .sort()
     .join(" | ");
+  const titleRow: (string | number)[] = [
+    titleStr,
+    ...new Array(Math.max(0, totalCols - 1)).fill(""),
+  ];
 
-  const totalCols = colMembers.length + 1;
-  const titleRow: (string | number)[] = [titleStr, ...new Array(totalCols - 1).fill("")];
-  const headerRow: (string | number)[] = [rowAxis, ...colMembers];
+  const colHeaderRows: (string | number)[][] = [];
+  const lastColHeaderIdx = colHeaderCount - 1;
+  for (let depth = 0; depth < colHeaderCount; depth++) {
+    const headerRow: (string | number)[] = [];
+    for (let r = 0; r < rowsLen; r++) {
+      headerRow.push(depth === lastColHeaderIdx ? axes.rows[r] : "");
+    }
+    for (const ct of sortedCols) {
+      headerRow.push(ct[depth] ?? "");
+    }
+    colHeaderRows.push(headerRow);
+  }
 
-  const dataRows: (string | number)[][] = rowMembers.map((rm) => {
-    const cells: (string | number)[] = [rm];
-    for (const cm of colMembers) {
-      const fact = cellMap.get(`${rm}|${cm}`);
+  const dataRows: (string | number)[][] = sortedRows.map((rt) => {
+    const cells: (string | number)[] = [...rt];
+    const rk = tupleKey(rt);
+    for (const ct of sortedCols) {
+      const ck = colsLen > 0 ? tupleKey(ct) : "";
+      const fact = cellMap.get(`${rk}||${ck}`);
       cells.push(fact ? fact.value : "");
     }
     return cells;
   });
 
-  const matrix: (string | number)[][] = [titleRow, headerRow, ...dataRows];
+  const matrix: (string | number)[][] = [titleRow, ...colHeaderRows, ...dataRows];
 
-  const driverFillCoords: FillCoord[] = [];
-  const dataStartRow = 2;
-  const dataColCount = colMembers.length;
-  const dataRowCount = rowMembers.length;
+  const driverFillCoords = computeDriverFills({
+    axes,
+    sortedRows,
+    sortedCols,
+    pageFilters,
+    driverAccounts,
+    dataStartRow: headerRowCount,
+    rowsLen,
+    dataColCount: sortedCols.length,
+    dataRowCount: sortedRows.length,
+  });
 
-  if (rowAxis === "account") {
-    rowMembers.forEach((rm, i) => {
-      if (driverAccounts.has(rm)) {
-        driverFillCoords.push({
+  return { matrix, driverFillCoords, headerRowCount };
+}
+
+function compareTuples(a: string[], b: string[]): number {
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? "";
+    const bv = b[i] ?? "";
+    if (av < bv) return -1;
+    if (av > bv) return 1;
+  }
+  return 0;
+}
+
+interface DriverFillArgs {
+  axes: AxisSpec;
+  sortedRows: string[][];
+  sortedCols: string[][];
+  pageFilters: PageFilters;
+  driverAccounts: ReadonlySet<string>;
+  dataStartRow: number;
+  rowsLen: number;
+  dataColCount: number;
+  dataRowCount: number;
+}
+
+function computeDriverFills(args: DriverFillArgs): FillCoord[] {
+  const {
+    axes,
+    sortedRows,
+    sortedCols,
+    pageFilters,
+    driverAccounts,
+    dataStartRow,
+    rowsLen,
+    dataColCount,
+    dataRowCount,
+  } = args;
+  const fills: FillCoord[] = [];
+  const accountInRows = axes.rows.indexOf("account");
+  const accountInCols = axes.cols.indexOf("account");
+
+  if (accountInRows >= 0) {
+    sortedRows.forEach((rt, i) => {
+      if (driverAccounts.has(rt[accountInRows])) {
+        fills.push({
           row: dataStartRow + i,
-          col: 1,
+          col: rowsLen,
           rows: 1,
           cols: dataColCount,
         });
       }
     });
-  } else if (colAxis === "account") {
-    colMembers.forEach((cm, i) => {
-      if (driverAccounts.has(cm)) {
-        driverFillCoords.push({
+    return fills;
+  }
+  if (accountInCols >= 0) {
+    sortedCols.forEach((ct, i) => {
+      if (driverAccounts.has(ct[accountInCols])) {
+        fills.push({
           row: dataStartRow,
-          col: 1 + i,
+          col: rowsLen + i,
           rows: dataRowCount,
           cols: 1,
         });
       }
     });
-  } else {
-    const accountFilter = pageFilters.account;
-    if (
-      accountFilter !== undefined &&
-      driverAccounts.has(accountFilter) &&
-      dataRowCount > 0 &&
-      dataColCount > 0
-    ) {
-      driverFillCoords.push({
-        row: dataStartRow,
-        col: 1,
-        rows: dataRowCount,
-        cols: dataColCount,
-      });
-    }
+    return fills;
   }
-
-  return { matrix, driverFillCoords, headerRowIndex: 1 };
-}
-
-function uniqueSorted(arr: string[]): string[] {
-  return Array.from(new Set(arr)).sort();
+  const accountFilter = pageFilters.account;
+  if (
+    accountFilter !== undefined &&
+    driverAccounts.has(accountFilter) &&
+    dataRowCount > 0 &&
+    dataColCount > 0
+  ) {
+    fills.push({
+      row: dataStartRow,
+      col: rowsLen,
+      rows: dataRowCount,
+      cols: dataColCount,
+    });
+  }
+  return fills;
 }

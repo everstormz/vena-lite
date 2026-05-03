@@ -1,4 +1,5 @@
 import { writeFactsToActiveSheet } from "../excel/refresh";
+import type { AxisSpec } from "../excel/axes";
 import type { FactRow } from "../types/generated";
 
 /**
@@ -70,6 +71,8 @@ function makeRows(n: number, accountFor: (i: number) => string = () => "A"): Fac
   }));
 }
 
+const NO_AXES: AxisSpec = { rows: [], cols: [] };
+
 afterEach(() => {
   delete (globalThis as unknown as { Excel?: unknown }).Excel;
 });
@@ -78,7 +81,7 @@ afterEach(() => {
 
 test("long-format: writes header + rows in one batched range", async () => {
   const captured = setupOfficeMock();
-  await writeFactsToActiveSheet(makeRows(96), null, null, {});
+  await writeFactsToActiveSheet(makeRows(96), NO_AXES, {});
 
   const dataWrite = captured.rangeWrites.find(
     (w) => w.row === 0 && w.col === 0 && w.rows > 1 && w.cols === 7,
@@ -91,7 +94,7 @@ test("long-format: writes header + rows in one batched range", async () => {
 test("long-format: exactly one context.sync per refresh, even with driver styling", async () => {
   const captured = setupOfficeMock();
   const rows = makeRows(20, (i) => (i % 2 === 0 ? "A" : "B"));
-  await writeFactsToActiveSheet(rows, null, null, {}, new Set(["B"]));
+  await writeFactsToActiveSheet(rows, NO_AXES, {}, new Set(["B"]));
   expect(captured.syncs).toBe(1);
 });
 
@@ -109,8 +112,7 @@ test("long-format: preserves values as strings (no numeric coercion)", async () 
         value: "123.456789",
       },
     ],
-    null,
-    null,
+    NO_AXES,
     {},
   );
 
@@ -122,7 +124,7 @@ test("long-format: preserves values as strings (no numeric coercion)", async () 
 
 test("long-format: empty rows still writes a header row", async () => {
   const captured = setupOfficeMock();
-  await writeFactsToActiveSheet([], null, null, {});
+  await writeFactsToActiveSheet([], NO_AXES, {});
   const dataWrite = captured.rangeWrites.find((w) => w.rows === 1 && w.cols === 7)!;
   expect(dataWrite.cols).toBe(7);
   expect(captured.syncs).toBe(1);
@@ -138,7 +140,7 @@ test("long-format: driver-account rows get a fill on the value cell only", async
     { account: "A", entity: "E", costcenter: "C", period: "2026-03",
       scenario: "Actual", version: "v1", value: "3.000000" },
   ];
-  await writeFactsToActiveSheet(rows, null, null, {}, new Set(["B"]));
+  await writeFactsToActiveSheet(rows, NO_AXES, {}, new Set(["B"]));
 
   expect(captured.fillSets).toHaveLength(1);
   const f = captured.fillSets[0];
@@ -150,7 +152,7 @@ test("long-format: driver-account rows get a fill on the value cell only", async
 
 test("long-format: no driverAccounts → no fills at all", async () => {
   const captured = setupOfficeMock();
-  await writeFactsToActiveSheet(makeRows(5), null, null, {});
+  await writeFactsToActiveSheet(makeRows(5), NO_AXES, {});
   expect(captured.fillSets).toHaveLength(0);
 });
 
@@ -158,7 +160,7 @@ test("long-format: no driverAccounts → no fills at all", async () => {
 
 test("clears a generous range before writing to wipe a previous refresh's cells", async () => {
   const captured = setupOfficeMock();
-  await writeFactsToActiveSheet(makeRows(5), null, null, {});
+  await writeFactsToActiveSheet(makeRows(5), NO_AXES, {});
   const clear = captured.clears.find((c) => c.row === 0 && c.col === 0 && c.rows >= 100);
   expect(clear).toBeDefined();
 });
@@ -179,8 +181,7 @@ test("pivot: writes title + header + data rows in one batched range", async () =
   ];
   await writeFactsToActiveSheet(
     rows,
-    "account",
-    "period",
+    { rows: ["account"], cols: ["period"] },
     { entity: "E", costcenter: "C", scenario: "Actual", version: "v1" },
   );
   // 1 title + 1 header + 2 data rows = 4 total; 1 row-label col + 2 period cols = 3 total.
@@ -198,8 +199,7 @@ test("pivot: exactly one context.sync per refresh, even with multiple driver fil
   ];
   await writeFactsToActiveSheet(
     rows,
-    "account",
-    "period",
+    { rows: ["account"], cols: ["period"] },
     { entity: "E", costcenter: "C", scenario: "Actual", version: "v1" },
     new Set(["5000_OpEx"]),
   );
@@ -220,12 +220,83 @@ test("pivot: driver row gets a fill spanning all data columns", async () => {
   ];
   await writeFactsToActiveSheet(
     rows,
-    "account",
-    "period",
+    { rows: ["account"], cols: ["period"] },
     { entity: "E", costcenter: "C", scenario: "Actual", version: "v1" },
     new Set(["5000_OpEx"]),
   );
   // Sorted accounts: 4000_Revenue at row 2, 5000_OpEx at row 3. Two periods → cols=2.
   const driverFill = captured.fillSets.find((f) => f.row === 3 && f.col === 1 && f.rows === 1 && f.cols === 2);
   expect(driverFill).toBeDefined();
+});
+
+// --- Slice 10: stacked axes ---------------------------------------------
+
+test("stacked-axes pivot: still ONE batched range write + ONE sync", async () => {
+  const captured = setupOfficeMock();
+  const rows: FactRow[] = [
+    { account: "4000_Revenue", entity: "E", costcenter: "CC100", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "1" },
+    { account: "4000_Revenue", entity: "E", costcenter: "CC100", period: "2026-01",
+      scenario: "Forecast", version: "v1", value: "2" },
+    { account: "4000_Revenue", entity: "E", costcenter: "CC200", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "3" },
+    { account: "5000_OpEx", entity: "E", costcenter: "CC100", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "4" },
+  ];
+  await writeFactsToActiveSheet(
+    rows,
+    { rows: ["account", "costcenter"], cols: ["period", "scenario"] },
+    { entity: "E", version: "v1" },
+    new Set(),
+  );
+  expect(captured.syncs).toBe(1);
+  // Multiple data writes are allowed (clear + main matrix write); the matrix
+  // write itself must be one rectangle covering all rows.
+  const matrixWrites = captured.rangeWrites.filter(
+    (w) => w.row === 0 && w.col === 0 && w.rows >= 4 && w.cols >= 2,
+  );
+  expect(matrixWrites).toHaveLength(1);
+});
+
+test("stacked rows: driver fill addresses each driver row separately", async () => {
+  const captured = setupOfficeMock();
+  const rows: FactRow[] = [
+    { account: "4000_Revenue", entity: "E", costcenter: "CC100", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "1" },
+    { account: "5000_OpEx", entity: "E", costcenter: "CC100", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "2" },
+    { account: "5000_OpEx", entity: "E", costcenter: "CC200", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "3" },
+  ];
+  await writeFactsToActiveSheet(
+    rows,
+    { rows: ["account", "costcenter"], cols: ["period"] },
+    { entity: "E", scenario: "Actual", version: "v1" },
+    new Set(["5000_OpEx"]),
+  );
+  // Sorted row tuples: [4000,CC100], [5000,CC100], [5000,CC200].
+  // dataStartRow=2; rowsLen=2 (skip first 2 cols); dataColCount=1.
+  // Driver fills land on the two 5000_OpEx rows.
+  const fills = captured.fillSets.filter((f) => f.col === 2);
+  expect(fills).toHaveLength(2);
+  expect(fills.map((f) => f.row).sort()).toEqual([3, 4]);
+});
+
+test("stacked-axes pivot: header rows are bolded as a single range", async () => {
+  const captured = setupOfficeMock();
+  const rows: FactRow[] = [
+    { account: "4000", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "1" },
+  ];
+  await writeFactsToActiveSheet(
+    rows,
+    { rows: ["account"], cols: ["period", "scenario"] },
+    { entity: "E", costcenter: "C", version: "v1" },
+  );
+  // headerRowCount = 1 title + 2 col header rows = 3. The bold range starts
+  // at row 0 with 3 rows.
+  // We can't easily inspect the bold setter, but we can verify there's no
+  // per-row bolding chatter — the fillSets list should be empty (no driver).
+  expect(captured.fillSets).toEqual([]);
+  expect(captured.syncs).toBe(1);
 });

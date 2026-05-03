@@ -28,8 +28,8 @@ afterEach(() => {
 });
 
 const LONG_FORMAT_LAYOUT: LayoutDescriptor = {
-  rowAxis: null,
-  colAxis: null,
+  rows: [],
+  cols: [],
   pageFilters: {},
 };
 
@@ -67,8 +67,8 @@ test("pivot two-axis: reconstructs intersections from row col + page filters", a
     ["5000_OpEx", "50.000000", "75.000000"],
   ]);
   const cells = await readCurrentValuesFromActiveSheet({
-    rowAxis: "account",
-    colAxis: "period",
+    rows: ["account"],
+    cols: ["period"],
     pageFilters: {
       entity: "E001_US",
       costcenter: "CC100_Sales",
@@ -105,8 +105,8 @@ test("pivot two-axis: empty cells are skipped (no submission for blanks)", async
     ["5000_OpEx", "", "75.000000"],        // 2026-01 blank → skip
   ]);
   const cells = await readCurrentValuesFromActiveSheet({
-    rowAxis: "account",
-    colAxis: "period",
+    rows: ["account"],
+    cols: ["period"],
     pageFilters: {
       entity: "E001_US",
       costcenter: "CC100_Sales",
@@ -129,8 +129,8 @@ test("pivot single-axis: uses col B as the value, ignores 'value' header text", 
     ["5000_OpEx", "50.000000"],
   ]);
   const cells = await readCurrentValuesFromActiveSheet({
-    rowAxis: "account",
-    colAxis: null,
+    rows: ["account"],
+    cols: [],
     pageFilters: {
       entity: "E001_US",
       costcenter: "CC100_Sales",
@@ -152,11 +152,110 @@ test("pivot: exactly one context.sync per submit read", async () => {
     ["A", "1", "2"],
   ]);
   await readCurrentValuesFromActiveSheet({
-    rowAxis: "account",
-    colAxis: "period",
+    rows: ["account"],
+    cols: ["period"],
     pageFilters: {
       entity: "E", costcenter: "C", scenario: "Actual", version: "v1",
     },
   });
   expect(captured.syncs).toBe(1);
+});
+
+// === Slice 10: stacked axes ===
+
+test("stacked rows: row tuple parsed from leading rowsLen cols", async () => {
+  // rows = [account, costcenter], cols = [period]
+  // headerRowCount = 1 title + 1 col header = 2; data starts at row 2; col data starts at col 2.
+  setupSheetMock([
+    ["entity=E001_US | scenario=Actual | version=v1", "", "", ""],
+    ["account", "costcenter", "2026-01", "2026-02"],
+    ["4000", "CC100", "10.000000", "20.000000"],
+    ["5000", "CC200", "30.000000", ""],
+  ]);
+  const cells = await readCurrentValuesFromActiveSheet({
+    rows: ["account", "costcenter"],
+    cols: ["period"],
+    pageFilters: { entity: "E001_US", scenario: "Actual", version: "v1" },
+  });
+  expect(cells).toHaveLength(3);
+  expect(cells[0]).toEqual({
+    account: "4000",
+    entity: "E001_US",
+    costcenter: "CC100",
+    period: "2026-01",
+    scenario: "Actual",
+    version: "v1",
+    value: "10.000000",
+  });
+  expect(cells[2]).toEqual({
+    account: "5000",
+    entity: "E001_US",
+    costcenter: "CC200",
+    period: "2026-01",
+    scenario: "Actual",
+    version: "v1",
+    value: "30.000000",
+  });
+});
+
+test("stacked cols: col tuple parsed from cols.length header rows", async () => {
+  // rows = [account], cols = [period, scenario]
+  // headerRowCount = 1 title + 2 col headers = 3; data starts at row 3; col data starts at col 1.
+  setupSheetMock([
+    ["entity=E | costcenter=C | version=v1", "", "", "", ""],
+    ["", "2026-01", "2026-01", "2026-02", "2026-02"],
+    ["account", "Actual", "Forecast", "Actual", "Forecast"],
+    ["4000", "10", "11", "20", "21"],
+  ]);
+  const cells = await readCurrentValuesFromActiveSheet({
+    rows: ["account"],
+    cols: ["period", "scenario"],
+    pageFilters: { entity: "E", costcenter: "C", version: "v1" },
+  });
+  expect(cells).toHaveLength(4);
+  expect(cells[0]).toEqual({
+    account: "4000",
+    entity: "E",
+    costcenter: "C",
+    period: "2026-01",
+    scenario: "Actual",
+    version: "v1",
+    value: "10",
+  });
+  expect(cells[3]).toEqual({
+    account: "4000",
+    entity: "E",
+    costcenter: "C",
+    period: "2026-02",
+    scenario: "Forecast",
+    version: "v1",
+    value: "21",
+  });
+});
+
+test("stacked rows + stacked cols: full Cartesian round-trip", async () => {
+  // rows = [account, costcenter], cols = [period, scenario]
+  // dataStartRow = 1 + 2 = 3; dataStartCol = 2.
+  setupSheetMock([
+    ["entity=E | version=v1", "", "", "", ""],
+    ["", "", "2026-01", "2026-01", "2026-02"],
+    ["account", "costcenter", "Actual", "Forecast", "Actual"],
+    ["4000", "CC100", "1", "2", "3"],
+    ["5000", "CC100", "4", "", "6"],
+  ]);
+  const cells = await readCurrentValuesFromActiveSheet({
+    rows: ["account", "costcenter"],
+    cols: ["period", "scenario"],
+    pageFilters: { entity: "E", version: "v1" },
+  });
+  expect(cells).toHaveLength(5);
+  const k = (c: { account: string; costcenter: string; period: string; scenario: string }) =>
+    `${c.account}/${c.costcenter}/${c.period}/${c.scenario}`;
+  expect(cells.map(k)).toEqual([
+    "4000/CC100/2026-01/Actual",
+    "4000/CC100/2026-01/Forecast",
+    "4000/CC100/2026-02/Actual",
+    "5000/CC100/2026-01/Actual",
+    "5000/CC100/2026-02/Actual",
+  ]);
 });

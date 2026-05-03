@@ -1,0 +1,21 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/office-js/custom-functions.schema.json",
+  "functions": [
+    {
+      "id": "LOOKUP",
+      "name": "LOOKUP",
+      "description": "Look up the current value at a Vena-lite cube intersection. Used as =VENA.LOOKUP(account, entity, costcenter, period, scenario, version).",
+      "result": {
+        "type": "string"
+      },
+      "parameters": [
+        { "name": "account", "description": "Account dim member id", "type": "string" },
+        { "name": "entity", "description": "Entity dim member id", "type": "string" },
+        { "name": "costcenter", "description": "CostCenter dim member id", "type": "string" },
+        { "name": "period", "description": "Period dim member id", "type": "string" },
+        { "name": "scenario", "description": "Scenario dim member id", "type": "string" },
+        { "name": "version", "description": "Version dim member id", "type": "string" }
+      ]
+    }
+  ]
+}

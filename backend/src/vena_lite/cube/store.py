@@ -101,6 +101,32 @@ class DuckDBCubeStore:
             for r in rows
         ]
 
+    def lookup_overrides(
+        self, intersections: list[IntersectionKey]
+    ) -> set[IntersectionKey]:
+        """Return the subset of `intersections` whose latest fact has
+        source='override:...' (i.e., is a currently-active override). Released
+        cells use source='driver:released:...' so they don't appear here.
+        Used by recalc to skip overridden intersections during recompute.
+        """
+        if not intersections:
+            return set()
+        clause = " OR ".join(
+            [
+                "(account_id=? AND entity_id=? AND costcenter_id=? "
+                "AND period_id=? AND scenario_id=? AND version_id=?)"
+            ]
+            * len(intersections)
+        )
+        params: list[object] = [item for tpl in intersections for item in tpl]
+        sql = (
+            "SELECT account_id, entity_id, costcenter_id, period_id, scenario_id, "
+            f"version_id FROM facts_current WHERE source LIKE 'override:%' "
+            f"AND ({clause})"
+        )
+        rows = self._conn.execute(sql, params).fetchall()
+        return {tuple(r[:6]) for r in rows}  # type: ignore[misc]
+
     def lookup_current_values(
         self, intersections: list[IntersectionKey]
     ) -> dict[IntersectionKey, Decimal | None]:
