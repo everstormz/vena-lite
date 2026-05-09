@@ -16,7 +16,22 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Text, makeStyles, tokens } from "@fluentui/react-components";
+import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
+  Switch,
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from "@fluentui/react-components";
+import {
+  Dismiss16Regular,
+  ReOrderDotsVertical20Regular,
+  Filter20Regular,
+} from "@fluentui/react-icons";
 import { DIM_NAMES, type DimName } from "../types/dims";
 import type { DimMemberInfo } from "../types/generated";
 import {
@@ -37,45 +52,101 @@ const useStyles = makeStyles({
   },
   laneRow: {
     display: "grid",
-    gridTemplateColumns: "70px 1fr",
+    gridTemplateColumns: "max-content 1fr",
     alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   laneLabel: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+    minWidth: "60px",
   },
   laneBox: {
     display: "flex",
     flexWrap: "wrap",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
-    minHeight: "32px",
+    minHeight: "36px",
     padding: tokens.spacingHorizontalXS,
     border: `1px dashed ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   laneBoxOver: {
     backgroundColor: tokens.colorNeutralBackground3Hover,
     border: `1px solid ${tokens.colorBrandStroke1}`,
   },
+  laneEmptyHint: {
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase100,
+    paddingLeft: tokens.spacingHorizontalXS,
+    fontStyle: "italic",
+  },
   chip: {
     display: "inline-flex",
     alignItems: "center",
-    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+    gap: "2px",
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: "2px",
+    paddingRight: "2px",
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
     borderRadius: tokens.borderRadiusSmall,
     fontSize: tokens.fontSizeBase200,
-    cursor: "grab",
     userSelect: "none",
-    touchAction: "none",
+    border: `1px solid ${tokens.colorBrandStroke2}`,
   },
   chipDragging: { opacity: 0.4 },
-  pickerBlock: {
+  chipHandle: {
+    display: "inline-flex",
+    cursor: "grab",
+    color: tokens.colorBrandForeground2,
+    touchAction: "none",
+    padding: "1px",
+    ":active": { cursor: "grabbing" },
+  },
+  chipLabel: {
+    paddingRight: tokens.spacingHorizontalXS,
+    paddingLeft: "2px",
+  },
+  chipRemove: {
+    display: "inline-flex",
+    alignItems: "center",
+    background: "transparent",
+    border: "none",
+    padding: "2px",
+    cursor: "pointer",
+    color: tokens.colorBrandForeground2,
+    borderRadius: tokens.borderRadiusSmall,
+    ":hover": {
+      backgroundColor: tokens.colorBrandBackground2Hover,
+      color: tokens.colorBrandForeground1,
+    },
+  },
+  filtersHeader: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  pickerStack: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalS,
-    marginTop: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalS,
+  },
+  drillRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+    paddingTop: tokens.spacingVerticalXS,
+  },
+  drillHint: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
 });
 
@@ -85,6 +156,8 @@ interface Props {
   dimensionsByName: Partial<Record<DimName, DimMemberInfo[]>>;
   onFilterChange: (dim: DimName, next: string[]) => void;
   onAxesChange: (next: AxisSpec) => void;
+  drillRows: boolean;
+  onDrillRowsChange: (next: boolean) => void;
   disabled?: boolean;
 }
 
@@ -94,6 +167,8 @@ export function AxisDesigner({
   dimensionsByName,
   onFilterChange,
   onAxesChange,
+  drillRows,
+  onDrillRowsChange,
   disabled,
 }: Props) {
   const styles = useStyles();
@@ -137,6 +212,11 @@ export function AxisDesigner({
     onAxesChange(moveDim(axes, activeId, targetLane));
   }
 
+  function removeFromLane(dim: DimName, fromLane: Lane) {
+    if (fromLane === "page") return; // already on page = no-op
+    onAxesChange(moveDim(axes, dim, "page"));
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -145,25 +225,72 @@ export function AxisDesigner({
       onDragEnd={onDragEnd}
     >
       <div className={styles.root}>
-        <LaneRow label="Rows" laneId="rows" dims={axes.rows} disabled={disabled} />
-        <LaneRow label="Columns" laneId="cols" dims={axes.cols} disabled={disabled} />
-        <LaneRow label="Page" laneId="page" dims={pageFilterDims(axes)} disabled={disabled} />
+        <LaneRow
+          label="Rows"
+          laneId="rows"
+          dims={axes.rows}
+          disabled={disabled}
+          emptyHint="drop dims here"
+          onRemove={removeFromLane}
+        />
+        <LaneRow
+          label="Columns"
+          laneId="cols"
+          dims={axes.cols}
+          disabled={disabled}
+          emptyHint="drop dims here"
+          onRemove={removeFromLane}
+        />
+        <LaneRow
+          label="Page"
+          laneId="page"
+          dims={pageFilterDims(axes)}
+          disabled={disabled}
+          removable={false}
+          onRemove={removeFromLane}
+        />
 
-        <div className={styles.pickerBlock}>
-          {DIM_NAMES.map((d) => (
-            <MultiMemberPicker
-              key={d}
-              label={d}
-              members={dimensionsByName[d] ?? []}
-              selected={filters[d] ?? []}
-              onChange={(next) => onFilterChange(d, next)}
-              disabled={disabled}
-            />
-          ))}
-        </div>
+        <DrillToggle
+          axes={axes}
+          drillRows={drillRows}
+          onDrillRowsChange={onDrillRowsChange}
+          disabled={disabled}
+        />
+
+        <Accordion collapsible defaultOpenItems={["filters"]}>
+          <AccordionItem value="filters">
+            <AccordionHeader>
+              <span className={styles.filtersHeader}>
+                <Filter20Regular />
+                <span>Filters</span>
+              </span>
+            </AccordionHeader>
+            <AccordionPanel>
+              <div className={styles.pickerStack}>
+                {DIM_NAMES.map((d) => (
+                  <MultiMemberPicker
+                    key={d}
+                    label={d}
+                    members={dimensionsByName[d] ?? []}
+                    selected={filters[d] ?? []}
+                    onChange={(next) => onFilterChange(d, next)}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
+            </AccordionPanel>
+          </AccordionItem>
+        </Accordion>
       </div>
       <DragOverlay>
-        {draggingDim ? <span className={styles.chip}>{draggingDim}</span> : null}
+        {draggingDim ? (
+          <span className={styles.chip}>
+            <span className={styles.chipHandle}>
+              <ReOrderDotsVertical20Regular />
+            </span>
+            <span className={styles.chipLabel}>{draggingDim}</span>
+          </span>
+        ) : null}
       </DragOverlay>
     </DndContext>
   );
@@ -174,19 +301,39 @@ interface LaneRowProps {
   laneId: Lane;
   dims: DimName[];
   disabled?: boolean;
+  emptyHint?: string;
+  removable?: boolean;
+  onRemove: (dim: DimName, fromLane: Lane) => void;
 }
 
-function LaneRow({ label, laneId, dims, disabled }: LaneRowProps) {
+function LaneRow({
+  label,
+  laneId,
+  dims,
+  disabled,
+  emptyHint,
+  removable = true,
+  onRemove,
+}: LaneRowProps) {
   const styles = useStyles();
   const { isOver, setNodeRef } = useDroppable({ id: `lane:${laneId}` });
-  const klass = `${styles.laneBox}${isOver ? ` ${styles.laneBoxOver}` : ""}`;
+  const klass = mergeClasses(styles.laneBox, isOver && styles.laneBoxOver);
   return (
     <div className={styles.laneRow}>
       <Text className={styles.laneLabel}>{label}</Text>
       <SortableContext items={dims} strategy={horizontalListSortingStrategy}>
         <div ref={setNodeRef} className={klass}>
+          {dims.length === 0 && emptyHint && (
+            <Text className={styles.laneEmptyHint}>{emptyHint}</Text>
+          )}
           {dims.map((d) => (
-            <Chip key={d} dim={d} disabled={disabled} />
+            <Chip
+              key={d}
+              dim={d}
+              disabled={disabled}
+              removable={removable}
+              onRemove={() => onRemove(d, laneId)}
+            />
           ))}
         </div>
       </SortableContext>
@@ -194,7 +341,60 @@ function LaneRow({ label, laneId, dims, disabled }: LaneRowProps) {
   );
 }
 
-function Chip({ dim, disabled }: { dim: DimName; disabled?: boolean }) {
+interface ChipProps {
+  dim: DimName;
+  disabled?: boolean;
+  removable: boolean;
+  onRemove: () => void;
+}
+
+interface DrillToggleProps {
+  axes: AxisSpec;
+  drillRows: boolean;
+  onDrillRowsChange: (next: boolean) => void;
+  disabled?: boolean;
+}
+
+/**
+ * Toggle for "drill into row hierarchy". Only meaningful for single-dim
+ * Rows axis (multi-dim stacking + drill is out of scope for v1 — the
+ * post-order traversal would be ambiguous across multiple dim hierarchies).
+ *
+ * When on, App.tsx expands the row dim's filter to include each selected
+ * member's full subtree on the next Refresh. The pivot emits rows in
+ * post-order with depth info; refresh.ts applies Excel native row outline
+ * grouping (the +/− gutter) so the user can collapse/expand subtrees in
+ * Excel directly.
+ */
+function DrillToggle({
+  axes,
+  drillRows,
+  onDrillRowsChange,
+  disabled,
+}: DrillToggleProps) {
+  const styles = useStyles();
+  const supported = axes.rows.length === 1;
+  const hint = !supported
+    ? axes.rows.length === 0
+      ? "Drill needs a dim on Rows."
+      : "Drill needs a single-dim Rows axis. Move all but one back to Page."
+    : drillRows
+      ? "Each selected parent expands to its subtree. Use Excel's +/− gutter to collapse."
+      : "Show parents alongside their children with Excel +/− grouping.";
+  return (
+    <div className={styles.drillRow}>
+      <Switch
+        checked={supported && drillRows}
+        disabled={disabled || !supported}
+        onChange={(_e, data) => onDrillRowsChange(Boolean(data.checked))}
+        label="Drill into row hierarchy"
+      />
+      <Text className={styles.drillHint}>{hint}</Text>
+    </div>
+  );
+}
+
+function Chip({ dim, disabled, removable, onRemove }: ChipProps) {
   const styles = useStyles();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: dim, disabled });
@@ -202,16 +402,28 @@ function Chip({ dim, disabled }: { dim: DimName; disabled?: boolean }) {
     transform: CSS.Transform.toString(transform),
     transition,
   };
-  const klass = `${styles.chip}${isDragging ? ` ${styles.chipDragging}` : ""}`;
+  const klass = mergeClasses(styles.chip, isDragging && styles.chipDragging);
   return (
-    <span
-      ref={setNodeRef}
-      style={style}
-      className={klass}
-      {...attributes}
-      {...listeners}
-    >
-      {dim}
+    <span ref={setNodeRef} style={style} className={klass} {...attributes}>
+      <span className={styles.chipHandle} {...listeners} aria-label={`Drag ${dim}`}>
+        <ReOrderDotsVertical20Regular />
+      </span>
+      <span className={styles.chipLabel}>{dim}</span>
+      {removable && (
+        <button
+          type="button"
+          className={styles.chipRemove}
+          aria-label={`Remove ${dim} from this lane`}
+          disabled={disabled}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <Dismiss16Regular />
+        </button>
+      )}
     </span>
   );
 }

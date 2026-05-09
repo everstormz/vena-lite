@@ -14,10 +14,19 @@ type Captured = {
   rangeWrites: { row: number; col: number; rows: number; cols: number; values: unknown }[];
   fillSets: { row: number; col: number; rows: number; cols: number; color: string }[];
   clears: { row: number; col: number; rows: number; cols: number }[];
+  groups: { row: number; col: number; rows: number; cols: number; option: string }[];
+  ungroups: { row: number; col: number; rows: number; cols: number; option: string }[];
 };
 
 function setupOfficeMock(): Captured {
-  const captured: Captured = { syncs: 0, rangeWrites: [], fillSets: [], clears: [] };
+  const captured: Captured = {
+    syncs: 0,
+    rangeWrites: [],
+    fillSets: [],
+    clears: [],
+    groups: [],
+    ungroups: [],
+  };
 
   const fakeRange = (r: number, c: number, rows: number, cols: number) => {
     const range: Record<string, unknown> = {};
@@ -28,6 +37,12 @@ function setupOfficeMock(): Captured {
     });
     range.clear = () => {
       captured.clears.push({ row: r, col: c, rows, cols });
+    };
+    range.group = (option: string) => {
+      captured.groups.push({ row: r, col: c, rows, cols, option });
+    };
+    range.ungroup = (option: string) => {
+      captured.ungroups.push({ row: r, col: c, rows, cols, option });
     };
     range.format = {
       font: { bold: false },
@@ -299,4 +314,71 @@ test("stacked-axes pivot: header rows are bolded as a single range", async () =>
   // per-row bolding chatter — the fillSets list should be empty (no driver).
   expect(captured.fillSets).toEqual([]);
   expect(captured.syncs).toBe(1);
+});
+
+// --- Hierarchy drill (Phase 4) ----------------------------------------
+
+test("drill: ungroups the clear range before applying new outline groups", async () => {
+  const captured = setupOfficeMock();
+  await writeFactsToActiveSheet(makeRows(5), NO_AXES, {});
+  // 8 ungroup calls on the clear range, regardless of whether the data has groups.
+  // Wipes any leftover outline from a prior refresh.
+  expect(captured.ungroups.length).toBe(8);
+  expect(captured.ungroups.every((u) => u.option === "ByRows")).toBe(true);
+});
+
+test("drill: passing rowsHierarchy emits Excel row groups at each level", async () => {
+  const captured = setupOfficeMock();
+  // Mock /slice response with rolled-up parent + leaf rows.
+  const rows: FactRow[] = [
+    { account: "Total_PnL", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "300" },
+    { account: "Revenue", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "200" },
+    { account: "Product", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "120" },
+    { account: "Service", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "80" },
+    { account: "OpEx", entity: "E", costcenter: "C", period: "2026-01",
+      scenario: "Actual", version: "v1", value: "100" },
+  ];
+  const order = ["Product", "Service", "Revenue", "OpEx", "Total_PnL"];
+  const depth = new Map<string, number>([
+    ["Product", 2],
+    ["Service", 2],
+    ["Revenue", 1],
+    ["OpEx", 1],
+    ["Total_PnL", 0],
+  ]);
+  await writeFactsToActiveSheet(
+    rows,
+    { rows: ["account"], cols: [] },
+    {},
+    new Set(),
+    { rowsHierarchy: { order, depth } },
+  );
+
+  // headerRowCount = 2 (title row + 1 col header). Data rows start at sheet row 2.
+  // Level 1 group: rows depth >= 1 are at indices 0..3 → sheet rows 2..5.
+  // Level 2 group: rows depth >= 2 are at indices 0..1 → sheet rows 2..3.
+  const dataGroups = captured.groups.filter((g) => g.option === "ByRows");
+  // Two groups expected (level 1 covering 4 rows; level 2 covering 2 rows).
+  expect(dataGroups.length).toBe(2);
+  const level1 = dataGroups.find((g) => g.row === 2 && g.rows === 4);
+  const level2 = dataGroups.find((g) => g.row === 2 && g.rows === 2);
+  expect(level1).toBeDefined();
+  expect(level2).toBeDefined();
+
+  // Still ONE batched range write + ONE sync (perf invariant intact).
+  expect(captured.syncs).toBe(1);
+});
+
+test("drill: no hierarchy → no groups beyond the cleanup ungroups", async () => {
+  const captured = setupOfficeMock();
+  await writeFactsToActiveSheet(
+    makeRows(3),
+    { rows: ["account"], cols: [] },
+    {},
+  );
+  expect(captured.groups).toEqual([]);
 });

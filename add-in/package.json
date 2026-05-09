@@ -18,6 +18,7 @@
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@fluentui/react-components": "^9.73.0",
+    "@fluentui/react-icons": "^2.0.325",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

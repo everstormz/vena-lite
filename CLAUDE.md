@@ -8,7 +8,7 @@ Slice 2+), FastAPI + DuckDB backend. Read SPEC.md before any nontrivial change
 - Backend: Python 3.11+, FastAPI, Pydantic v2, DuckDB (cube), SQLite (metadata, Slice 4+)
 - Add-in: Office.js + Vite + React 19 + TypeScript + Fluent UI v9 (hand-rolled, not Yeoman)
 - Calc: hand-rolled formula parser + CalcEngine (no `eval`); pure functions over Decimal
-- Tests: pytest (backend, 192), Jest with ts-jest (add-in, 91)
+- Tests: pytest (backend, 192), Jest with ts-jest CJS preset (add-in, 124)
 
 ## Build philosophy
 - Six vertical slices. Each merges to main only when end-to-end demoable.
@@ -77,6 +77,46 @@ Slice 2+), FastAPI + DuckDB backend. Read SPEC.md before any nontrivial change
   `recalc_for_submit` and `recalc_for_initial_define` fetch the set
   via `cube.lookup_overrides` once per batch — call those, not the
   inner function.
+- Don't pass bare numbers to Griffel `makeStyles` CSS values
+  (Phase 4). `padding: 2` is a type error — use `padding: "2px"`
+  or a Fluent token (`tokens.spacingHorizontalXS`). Phase 4 hit this
+  several times; the pattern is now consistent across components.
+- Don't switch the Jest preset back to ESM (Phase 4). It's
+  `ts-jest/presets/default` (CJS) so Jest's resolver picks Fluent's
+  `lib-commonjs` bundles via `package.json` `main`. ESM mode tripped
+  on transitive `@fluentui/react-icons/lib/providers` imports.
+  `add-in/jest.setup.cjs` polyfills `ResizeObserver`,
+  `IntersectionObserver`, and `matchMedia` — required for any test
+  that renders a Fluent component.
+- Don't switch hierarchy-drill traversal from post-order to
+  pre-order (Phase 4) without first verifying Office.js can set
+  `summaryRowsBelow = false`. Excel's default is "summary below
+  detail" and Office.js doesn't expose the toggle, so post-order
+  (descendants above parent) is what puts the +/− gutter icon on
+  the parent row.
+- Don't drop the 8× `range.ungroup("ByRows")` cleanup in
+  `refresh.ts` (Phase 4). It wipes leftover outline groups so
+  toggling drill off → on → off doesn't accumulate stale grouping.
+- Don't use the two-click "Click again to confirm" delete pattern
+  for new destructive actions (Phase 4). Use `<ConfirmDialog/>`
+  from `add-in/src/components/ConfirmDialog.tsx` — it's the
+  canonical shape and replaces the old patterns in
+  `DimensionManagerPanel` and `DefineDriverPanel`.
+- Don't bypass `<StatusBar/>` (Phase 4) by rendering panel-internal
+  `<Text className={styles.error}>`. Use the shared `Status` type
+  from `StatusBar.tsx`.
+- Don't reinvent the 6-dim picker (Phase 4). Use
+  `<IntersectionPicker/>` from
+  `add-in/src/components/IntersectionPicker.tsx`. It's leaves-only
+  + controlled.
+- Don't try to drill on a stacked or col axis (Phase 4 v1
+  limitation). `<DrillToggle/>` requires `axes.rows.length === 1`.
+  Stacked-axis drill is ambiguous (which dim's hierarchy first?)
+  and out of scope. Cols drill is symmetric to rows but adds a
+  second axis-grouping computation in pivot/refresh.
+- Don't persist `drillRows` state to Office Settings without bumping
+  filters to v3 (Phase 4). Today drill is React-only. Schema bump
+  + v2 → v3 migration must land together.
 
 ## Useful entry points
 ### Backend
@@ -104,50 +144,73 @@ Slice 2+), FastAPI + DuckDB backend. Read SPEC.md before any nontrivial change
 - `backend/src/vena_lite/calc/recalc.py` — driver recompute orchestration; `compute_driver_cells` honors the override set (Slice 11)
 
 ### Add-in
-- `add-in/src/App.tsx` — taskpane UI; mounts four accordion panels (Copy / Define / Manage dimensions / Override cell). `triggerWorkbookRecalc` after Submit forces `=VENA.LOOKUP` to refetch (Slice 11). `autoFillDefaults` pre-picks first leaf for each non-axis dim on first load (Slice 10)
+- `add-in/src/App.tsx` — taskpane shell. Sticky header + sticky toolbar + accordion (Layout / Scenarios / Drivers / Dimensions / Cell tools). Cell tools is a sub-accordion: Add a cell / Insert =VENA.LOOKUP / Override (Phase 4). `drillRows` state + filter expansion via `expandToSubtree` on Refresh (Phase 4). `triggerWorkbookRecalc` after Submit forces `=VENA.LOOKUP` to refetch (Slice 11). `autoFillDefaults` pre-picks first leaf for each non-axis dim on first load (Slice 10)
 - `add-in/src/types/dims.ts` — canonical narrow `DimName` union + `DIM_NAMES` constant
 - `add-in/src/excel/axes.ts` — pure `AxisSpec` helpers: `tupleKey`, `parseTuple`, `pageFilterDims`, `laneOf`, `moveDim`, `reorderInLane` (Slice 10)
-- `add-in/src/excel/refresh.ts` — Office.js batched range write; multi-axis aware (Slice 10)
-- `add-in/src/excel/pivot.ts` — pure multi-axis pivot transform; pipe-delimited tuple keys (Slice 10); no Office.js
-- `add-in/src/excel/filters.ts` — Office Settings persistence (key `vena_lite.filters.v2`); v1→v2 in-place migration (Slice 10)
+- `add-in/src/excel/hierarchy.ts` — pure drill helpers (Phase 4): `subtreePostOrder`, `depthsFromRoots`, `expandToSubtree`, `groupingRanges`. No Office.js
+- `add-in/src/excel/refresh.ts` — Office.js batched range write; multi-axis aware (Slice 10); applies `range.group("ByRows")` + 8× `ungroup` cleanup for hierarchy drill (Phase 4)
+- `add-in/src/excel/pivot.ts` — pure multi-axis pivot transform; pipe-delimited tuple keys (Slice 10); `AxisHierarchy` + `PivotOpts` + `rowDepths` for drill (Phase 4); no Office.js
+- `add-in/src/excel/filters.ts` — Office Settings persistence (key `vena_lite.filters.v2`); v1→v2 in-place migration (Slice 10). Drill state intentionally NOT persisted (Phase 4)
 - `add-in/src/excel/baseline.ts` — Office Settings snapshot for delta detection
 - `add-in/src/excel/delta.ts` — pure delta detection
-- `add-in/src/excel/submit.ts` — Office.js read-current-values; multi-axis `LayoutDescriptor` (Slice 10)
+- `add-in/src/excel/submit.ts` — Office.js read-current-values; multi-axis `LayoutDescriptor` (Slice 10); `.trim()` on row labels handles drill indent (Phase 4)
 - `add-in/src/excel/dim_tree.ts` — shared `buildTree` + `memberLabel*` helpers (Slice 9)
 - `add-in/src/excel/cell_address.ts` — `intersectionAtCell` for OverridePanel (Slice 11); pure
 - `add-in/src/api/client.ts` — typed fetch wrapper; helpers per HTTP verb (postJson/patchJson/deleteJson/deleteJsonWithBody for Slice 11 release)
+- `add-in/src/components/AppHeader.tsx` — Phase 4 sticky title + scenario/version chips + Settings placeholder
+- `add-in/src/components/AppToolbar.tsx` — Phase 4 sticky Refresh + Submit buttons; consolidated validation caption
+- `add-in/src/components/StatusBar.tsx` — Phase 4 unified status sink wrapping Fluent `MessageBar`; canonical `Status` type
+- `add-in/src/components/SectionHeader.tsx` — Phase 4 icon + label + count for accordion headers
+- `add-in/src/components/ConfirmDialog.tsx` — Phase 4 canonical destructive-action UI; replaces two-click delete patterns
+- `add-in/src/components/EmptyState.tsx` — Phase 4 empty-list / no-cell-inspected placeholder
+- `add-in/src/components/IntersectionPicker.tsx` — Phase 4 canonical 6-dim picker (leaves only); controlled component used by Quick Add + Insert Lookup
+- `add-in/src/components/QuickAddPanel.tsx` — Phase 4 Cell tools sub-section: pick + write a single cell via `/submit`, no Refresh/baseline needed
+- `add-in/src/components/InsertLookupPanel.tsx` — Phase 4 Cell tools sub-section: build a `=VENA.LOOKUP(...)` formula and insert into selected cell or copy to clipboard
 - `add-in/src/components/MemberPicker.tsx` — single-select; renders `display_name ?? id`
 - `add-in/src/components/MultiMemberPicker.tsx` — multi-select with depth-indent (Slice 8)
-- `add-in/src/components/AxisDesigner.tsx` — three drag-drop lanes (Rows/Columns/Page); `@dnd-kit/sortable` (Slice 10). Replaces AxisPicker + FilterStrip
-- `add-in/src/components/CopyScenarioPanel.tsx` — Slice 5 scenario copy UI
-- `add-in/src/components/DefineDriverPanel.tsx` — Slice 6 define + Slice 9 undefine
-- `add-in/src/components/DimensionManagerPanel.tsx` — Slice 9 dim CRUD UI
-- `add-in/src/components/OverridePanel.tsx` — Slice 11 override SET / RELEASE UI
+- `add-in/src/components/AxisDesigner.tsx` — three drag-drop lanes (Rows/Columns/Page); chip drag handle + ✕ remove (Phase 4); `@dnd-kit/sortable` (Slice 10); `<DrillToggle/>` Switch for hierarchy drill (Phase 4)
+- `add-in/src/components/CopyScenarioPanel.tsx` — Slice 5 scenario copy UI; From → To layout (Phase 4)
+- `add-in/src/components/DefineDriverPanel.tsx` — Slice 6 define + Slice 9 undefine; Phase 4 inline account creation (auto-creates as root-level leaf if id is new) + smart hint badges
+- `add-in/src/components/DimensionManagerPanel.tsx` — Slice 9 dim CRUD UI; Phase 4 inline edit form replaced with proper `<Dialog/>`, depth-based indent instead of NBSP, add-member sub-Accordion
+- `add-in/src/components/OverridePanel.tsx` — Slice 11 override SET / RELEASE UI; Phase 4 Overridden / Driver `<Badge/>` + EmptyState before inspect
 - `add-in/public/functions.js` — plain-JS `=VENA.LOOKUP` implementation (Slice 11). Absolute URLs only (Web Worker context)
 - `add-in/public/functions.html` — custom-functions runtime page (Slice 11)
 - `add-in/public/functions.json` — Office Custom Functions metadata (Slice 11)
 - `add-in/manifest.xml` — sideloaded into Excel; V1_0 non-shared CustomFunctions ExtensionPoint (Slice 11). Run `npx office-addin-manifest validate manifest.xml` after edits
 - `add-in/vite.config.ts` — HTTPS dev server + /api proxy to backend; `host: true` + `strictPort: true` (Slice 10)
+- `add-in/jest.config.cjs` — Phase 4 CJS preset; Fluent UI's `lib-commonjs` resolves naturally
+- `add-in/jest.setup.cjs` — Phase 4 jsdom polyfills (`ResizeObserver`, `IntersectionObserver`, `matchMedia`)
 
 ### Project
 - `SPEC.md` — domain contract
 - `.claude/docs/phase-1-handoff.md` — Phase 1 architecture (Slices 1–7)
 - `.claude/docs/phase-2-handoff.md` — Phase 2 architecture (Slices 8–9)
 - `.claude/docs/phase-3-handoff.md` — Phase 3 architecture (Slices 10–11)
+- `.claude/docs/phase-4-handoff.md` — Phase 4 architecture (UI polish + hierarchy drill)
 - `tasks.ps1` (Windows) / `Makefile` (Linux/Mac/CI) — workflow entry points
 
 ## Current state
-Phase 1 (Slices 1–7), Phase 2 (Slices 8–9), and Phase 3 (Slices 10–11)
-shipped. The taskpane is a Vena/Anaplan-style report builder: three
-drag-drop lanes (Rows/Columns/Page) via `@dnd-kit/sortable` with
-multi-dim axis stacking, plus per-dim member pickers, a client-side
-pivot rendered in one batched range write, and four accordion panels
-(Copy / Define / Manage dimensions / Override cell). The dim model is
-editable from the taskpane with an alias layer (mutable
-`display_name`, immutable `member_id`). Drivers can be undefined;
-prior computed facts stay (append-only). Single driver-cells can be
-manually overridden; the override sticks through subsequent recalcs
-until released.
+Phase 1 (Slices 1–7), Phase 2 (Slices 8–9), Phase 3 (Slices 10–11),
+and Phase 4 (UI polish + hierarchy drill) shipped. The taskpane is a
+Vena/Anaplan-style report builder with a sticky header + toolbar and
+five icon-led accordion sections (Layout / Scenarios / Drivers /
+Dimensions / Cell tools). Layout has three drag-drop lanes
+(Rows/Columns/Page) via `@dnd-kit/sortable` with multi-dim axis
+stacking, plus a "Drill into row hierarchy" Switch that uses Excel's
+native row outline gutter for +/− interaction (Phase 4). Cell tools
+is a sub-accordion with three sub-sections: Add a cell (single-cell
+write via `/submit`, no Refresh needed), Insert =VENA.LOOKUP formula
+(builds + writes into selected cell or clipboard), and Override (the
+Slice 11 single-cell override flow).
+
+The dim model is editable from the taskpane with an alias layer
+(mutable `display_name`, immutable `member_id`). The Drivers panel
+auto-creates new accounts inline if the typed id doesn't exist —
+typing `Profit_Margin` in a fresh field creates it as a root-level
+leaf and defines the formula in one click (Phase 4). Drivers can be
+undefined; prior computed facts stay (append-only). Single
+driver-cells can be manually overridden via Cell tools → Override;
+the override sticks through subsequent recalcs until released.
 
 Excel custom function `=VENA.LOOKUP(account, entity, costcenter,
 period, scenario, version)` is registered via the manifest's
@@ -188,8 +251,29 @@ NUMBER + bad partial IDENT. Cycle detection happens at definition time via
 transitive closure on the existing dependency graph. Formulas reference
 `member_id`, never `display_name`.
 
-Read `.claude/docs/phase-3-handoff.md` for Phase 3 deltas (Slice 10 +
-Slice 11 architecture, decisions, invariants, gotchas); read
-`.claude/docs/phase-2-handoff.md` for Phase 2 (Slices 8–9); read
-`.claude/docs/phase-1-handoff.md` for the original Phase 1 baseline
-(Slices 1–7).
+Hierarchy drill (Phase 4) is single-axis-rows only and entirely
+client-side: when toggled on, App.tsx expands the row dim's filter
+to include each selected member's full subtree
+(`expandToSubtree`), the `/slice` response includes rolled-up
+parent rows + per-leaf rows, pivot.ts emits them post-order
+(descendants above parent, indented) with a `rowDepths` array, and
+refresh.ts calls `range.group("ByRows")` per outline level so the
+user gets Excel's native +/− gutter on parent rows. State lives in
+the .xlsx outline (free persistence on save); the React drill
+toggle is intentionally not persisted.
+
+Phase 4 also shipped a shared component vocabulary that future
+panels should reuse: `<AppHeader/>`, `<AppToolbar/>`,
+`<StatusBar/>`, `<SectionHeader/>`, `<ConfirmDialog/>`,
+`<EmptyState/>`, `<IntersectionPicker/>`. The Jest preset switched
+from ESM to CJS so React component tests can render Fluent UI
+without `moduleNameMapper` hacks; `jest.setup.cjs` provides jsdom
+polyfills for `ResizeObserver`, `IntersectionObserver`, and
+`matchMedia`. New dep: `@fluentui/react-icons`.
+
+Read `.claude/docs/phase-4-handoff.md` for Phase 4 deltas (UI
+polish + drill architecture, decisions, invariants, gotchas);
+`.claude/docs/phase-3-handoff.md` for Phase 3 (Slice 10 + Slice
+11); `.claude/docs/phase-2-handoff.md` for Phase 2 (Slices 8–9);
+`.claude/docs/phase-1-handoff.md` for the original Phase 1
+baseline (Slices 1–7).

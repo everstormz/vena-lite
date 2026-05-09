@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Badge,
   Button,
   Field,
   Input,
@@ -7,6 +8,11 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
+import {
+  CursorClick20Regular,
+  CursorClick24Regular,
+  TableEdit20Regular,
+} from "@fluentui/react-icons";
 import {
   fetchValue,
   newRequestId,
@@ -17,6 +23,8 @@ import {
 import { intersectionAtCell } from "../excel/cell_address";
 import type { LayoutDescriptor } from "../excel/submit";
 import { DIM_NAMES, type DimName } from "../types/dims";
+import { EmptyState } from "./EmptyState";
+import { StatusBar, type Status } from "./StatusBar";
 
 const useStyles = makeStyles({
   root: {
@@ -28,25 +36,71 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
-  status: { color: tokens.colorNeutralForeground2, minHeight: "1.4em" },
-  error: { color: tokens.colorPaletteRedForeground1 },
-  kvBlock: {
-    display: "grid",
-    gridTemplateColumns: "max-content 1fr",
-    columnGap: tokens.spacingHorizontalS,
-    rowGap: tokens.spacingVerticalXXS,
-    fontSize: tokens.fontSizeBase200,
-    fontFamily: tokens.fontFamilyMonospace,
+  inspectedBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
     padding: tokens.spacingHorizontalS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
+  },
+  inspectedHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalS,
+  },
+  cellAddr: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  kvGrid: {
+    display: "grid",
+    gridTemplateColumns: "max-content 1fr",
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: "2px",
+    fontSize: tokens.fontSizeBase200,
+  },
+  dimLabel: {
+    color: tokens.colorNeutralForeground3,
+    textTransform: "capitalize",
+  },
+  dimValue: {
+    fontFamily: tokens.fontFamilyMonospace,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  valueRow: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    marginTop: tokens.spacingVerticalXS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  valueAmount: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+  },
+  valueSource: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    fontFamily: tokens.fontFamilyMonospace,
+  },
+  buttonRow: {
+    display: "flex",
+    gap: tokens.spacingHorizontalS,
   },
 });
 
 interface Props {
   layout: LayoutDescriptor | null;
   driverAccounts: ReadonlySet<string>;
-  onChanged: () => void; // refresh trigger after override / release succeeds
+  onChanged: () => void;
 }
 
 interface Inspected {
@@ -61,24 +115,26 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
   const [inspected, setInspected] = useState<Inspected | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{ kind: "ok" | "error"; msg: string } | null>(null);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   async function onInspect() {
     setBusy(true);
-    setStatus(null);
+    setStatus({ kind: "idle" });
     setInspected(null);
     try {
       if (!layout) {
-        setStatus({ kind: "error", msg: "Click Refresh first." });
+        setStatus({ kind: "error", message: "Click Refresh first." });
         return;
       }
       const cellInfo = await readSelectedCell(layout);
       if (!cellInfo) {
-        setStatus({ kind: "error", msg: "Select a single data cell first." });
+        setStatus({
+          kind: "error",
+          message: "Select a single data cell first.",
+        });
         return;
       }
       const { intersection, address } = cellInfo;
-      // Fetch current value (404 means there's no fact yet — still valid for override)
       try {
         const resp = await fetchValue(intersection);
         setInspected({
@@ -89,7 +145,6 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
         });
         setInputValue(resp.value);
       } catch (err) {
-        // 404: no fact yet. Still allow override of an empty cell.
         if (err instanceof Error && err.message.includes("404")) {
           setInspected({ intersection, address, value: "", source: "" });
           setInputValue("");
@@ -98,10 +153,7 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
         }
       }
     } catch (err) {
-      setStatus({
-        kind: "error",
-        msg: err instanceof Error ? err.message : String(err),
-      });
+      setStatus({ kind: "error", message: errMsg(err) });
     } finally {
       setBusy(false);
     }
@@ -110,7 +162,7 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
   async function onOverride() {
     if (!inspected) return;
     setBusy(true);
-    setStatus(null);
+    setStatus({ kind: "idle" });
     try {
       await postOverride({
         request_id: newRequestId(),
@@ -119,15 +171,12 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
       await triggerRecalc();
       setStatus({
         kind: "ok",
-        msg: `Overrode ${inspected.intersection.account} at ${inspected.address}.`,
+        message: `Overrode ${inspected.intersection.account} at ${inspected.address}.`,
       });
       onChanged();
       setInspected(null);
     } catch (err) {
-      setStatus({
-        kind: "error",
-        msg: err instanceof Error ? err.message : String(err),
-      });
+      setStatus({ kind: "error", message: errMsg(err) });
     } finally {
       setBusy(false);
     }
@@ -136,7 +185,7 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
   async function onRelease() {
     if (!inspected) return;
     setBusy(true);
-    setStatus(null);
+    setStatus({ kind: "idle" });
     try {
       await releaseOverride({
         request_id: newRequestId(),
@@ -145,15 +194,12 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
       await triggerRecalc();
       setStatus({
         kind: "ok",
-        msg: `Released override at ${inspected.address}.`,
+        message: `Released override at ${inspected.address}.`,
       });
       onChanged();
       setInspected(null);
     } catch (err) {
-      setStatus({
-        kind: "error",
-        msg: err instanceof Error ? err.message : String(err),
-      });
+      setStatus({ kind: "error", message: errMsg(err) });
     } finally {
       setBusy(false);
     }
@@ -162,38 +208,72 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
   const isDriver = inspected
     ? driverAccounts.has(inspected.intersection.account)
     : false;
-  const isOverridden = inspected ? inspected.source.startsWith("override:") : false;
+  const isOverridden = inspected
+    ? inspected.source.startsWith("override:")
+    : false;
 
   return (
     <div className={styles.root}>
       <Text className={styles.hint}>
-        Select one driver-controlled cell in the sheet, then click Inspect.
-        Override sets a manual value that recalc won&rsquo;t replace; Release
-        un-pins the cell so the formula takes over again.
+        Select a driver-controlled cell in the sheet and click Inspect. Override
+        sets a manual value that survives recalc; Release lets the formula take
+        over again.
       </Text>
       <Button
         appearance="secondary"
+        icon={<CursorClick20Regular />}
         disabled={busy || !layout}
         onClick={onInspect}
       >
         {busy ? "Inspecting…" : "Inspect selected cell"}
       </Button>
 
-      {inspected && (
+      {!inspected ? (
+        <EmptyState
+          icon={<CursorClick24Regular />}
+          title="No cell inspected"
+          hint={
+            layout
+              ? "Click a data cell, then press Inspect."
+              : "Refresh first, then click a data cell."
+          }
+        />
+      ) : (
         <>
-          <div className={styles.kvBlock}>
-            <Text>cell:</Text>
-            <Text>{inspected.address}</Text>
-            {DIM_NAMES.map((d) => (
-              <span key={d} style={{ display: "contents" }}>
-                <Text>{d}:</Text>
-                <Text>{inspected.intersection[d as DimName]}</Text>
-              </span>
-            ))}
-            <Text>value:</Text>
-            <Text>{inspected.value || "(none)"}</Text>
-            <Text>source:</Text>
-            <Text>{inspected.source || "(none)"}</Text>
+          <div className={styles.inspectedBlock}>
+            <div className={styles.inspectedHeader}>
+              <Text className={styles.cellAddr}>{inspected.address}</Text>
+              {isOverridden && (
+                <Badge appearance="filled" color="warning" size="small">
+                  Overridden
+                </Badge>
+              )}
+              {!isOverridden && isDriver && (
+                <Badge appearance="tint" color="brand" size="small">
+                  Driver
+                </Badge>
+              )}
+            </div>
+            <div className={styles.kvGrid}>
+              {DIM_NAMES.map((d) => (
+                <span key={d} style={{ display: "contents" }}>
+                  <Text className={styles.dimLabel}>{d}</Text>
+                  <Text className={styles.dimValue} title={inspected.intersection[d as DimName]}>
+                    {inspected.intersection[d as DimName]}
+                  </Text>
+                </span>
+              ))}
+            </div>
+            <div className={styles.valueRow}>
+              <Text className={styles.valueAmount}>
+                {inspected.value || "(none)"}
+              </Text>
+              {inspected.source && (
+                <Text className={styles.valueSource}>
+                  via {inspected.source}
+                </Text>
+              )}
+            </div>
           </div>
 
           {!isDriver && (
@@ -212,33 +292,34 @@ export function OverridePanel({ layout, driverAccounts, onChanged }: Props) {
                   placeholder="e.g. 9999.000000"
                 />
               </Field>
-              <Button
-                appearance="primary"
-                disabled={busy || !inputValue.trim()}
-                onClick={onOverride}
-              >
-                {isOverridden ? "Replace override" : "Override"}
-              </Button>
-              {isOverridden && (
-                <Button appearance="subtle" disabled={busy} onClick={onRelease}>
-                  Release override
+              <div className={styles.buttonRow}>
+                <Button
+                  appearance="primary"
+                  icon={<TableEdit20Regular />}
+                  disabled={busy || !inputValue.trim()}
+                  onClick={onOverride}
+                >
+                  {isOverridden ? "Replace override" : "Override"}
                 </Button>
-              )}
+                {isOverridden && (
+                  <Button
+                    appearance="subtle"
+                    disabled={busy}
+                    onClick={onRelease}
+                  >
+                    Release
+                  </Button>
+                )}
+              </div>
             </>
           )}
         </>
       )}
 
-      {status && (
-        <Text className={status.kind === "error" ? styles.error : styles.status}>
-          {status.kind === "error" ? `Error: ${status.msg}` : status.msg}
-        </Text>
-      )}
+      <StatusBar status={status} showLoading={false} />
     </div>
   );
 }
-
-// === Helpers ===
 
 interface SelectedCellInfo {
   intersection: ValueIntersection;
@@ -271,4 +352,8 @@ async function triggerRecalc(): Promise<void> {
     ctx.workbook.application.calculate("Full");
     await ctx.sync();
   });
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

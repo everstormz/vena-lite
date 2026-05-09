@@ -270,3 +270,72 @@ test("driver fill in stacked rows: account is one component", () => {
     { row: 4, col: 2, rows: 1, cols: 1 },
   ]);
 });
+
+// --- Hierarchy drill (Phase 4) ----------------------------------------
+
+test("hierarchy: row tuples sorted in post-order, depths emitted, label indented", () => {
+  // Mirror of the hierarchy.test.ts fixture: Total_PnL > {Revenue > {Product, Service}, OpEx}.
+  // /slice would return rolled-up rows for parents AND leaf rows for descendants.
+  const rows: FactRow[] = [
+    fact({ account: "Total_PnL", value: "300" }),
+    fact({ account: "Revenue", value: "200" }),
+    fact({ account: "Product", value: "120" }),
+    fact({ account: "Service", value: "80" }),
+    fact({ account: "OpEx", value: "100" }),
+  ];
+  const order = ["Product", "Service", "Revenue", "OpEx", "Total_PnL"];
+  const depth = new Map<string, number>([
+    ["Product", 2],
+    ["Service", 2],
+    ["Revenue", 1],
+    ["OpEx", 1],
+    ["Total_PnL", 0],
+  ]);
+  const result = buildPivot(
+    rows,
+    { rows: ["account"], cols: [] },
+    {},
+    new Set(),
+    { rowsHierarchy: { order, depth } },
+  );
+
+  // matrix: [titleRow, header, ...dataRows]
+  expect(result.matrix.slice(2).map((r) => r[0])).toEqual([
+    "    Product",   // depth 2 → 4-space indent
+    "    Service",   // depth 2
+    "  Revenue",     // depth 1
+    "  OpEx",        // depth 1
+    "Total_PnL",     // depth 0
+  ]);
+  expect(result.rowDepths).toEqual([2, 2, 1, 1, 0]);
+});
+
+test("hierarchy: rowDepths is all zeros when no opts.rowsHierarchy is provided", () => {
+  const rows: FactRow[] = [
+    fact({ account: "4000_Revenue", value: "1" }),
+    fact({ account: "5000_OpEx", value: "2" }),
+  ];
+  const result = buildPivot(rows, { rows: ["account"], cols: [] }, {}, new Set());
+  expect(result.rowDepths).toEqual([0, 0]);
+});
+
+test("hierarchy: ignored when row axis is multi-dim (v1 limitation)", () => {
+  const rows: FactRow[] = [
+    fact({ account: "Total_PnL", costcenter: "CC100_Sales", value: "1" }),
+    fact({ account: "Revenue", costcenter: "CC100_Sales", value: "2" }),
+  ];
+  const order = ["Revenue", "Total_PnL"];
+  const depth = new Map([
+    ["Revenue", 1],
+    ["Total_PnL", 0],
+  ]);
+  const result = buildPivot(
+    rows,
+    { rows: ["account", "costcenter"], cols: [] },
+    {},
+    new Set(),
+    { rowsHierarchy: { order, depth } },
+  );
+  // Multi-dim rows: hierarchy ignored, falls back to lex sort, no depths.
+  expect(result.rowDepths).toEqual([0, 0]);
+});
